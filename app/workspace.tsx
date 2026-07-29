@@ -16,7 +16,7 @@ const modeOptions = [
 function BrandLogo() {
   // This bundled SVG is a tiny local UI asset and does not need image optimization.
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src="/logo.svg" alt="" width="26" height="22" />;
+  return <img src="./logo.svg" alt="" width="26" height="22" />;
 }
 
 function CanvasEmpty({ kind = "both" }: { kind?: "actual" | "design" | "both" }) {
