@@ -1,6 +1,6 @@
 import type { DesignAsset } from "./types";
 
-const DB_NAME = "tars-ui-inspector";
+const DB_NAME = "tars-ui-inspector-v2";
 const STORE = "images";
 const VERSION = 1;
 export type ImageKind = "actual" | "design";
