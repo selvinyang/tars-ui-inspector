@@ -13,7 +13,9 @@ const modeOptions = [
   { value: "diff", label: "差异高亮", short: "差异" },
 ] as { value: CompareMode; label: string; short: string }[];
 
-type FigmaFrame = { fileKey: string; nodeId: string; fileName: string; name: string; type: string; width: number; height: number; imagePath: string };
+type FigmaTextLayer = { id: string; name: string; text: string; fontFamily: string; fontWeight: number | null; fontSize: number | null; lineHeight: number | null; lineHeightPercent: number | null; letterSpacing: number | null; textAlign: string | null; color: string | null; x: number | null; y: number | null; width: number | null; height: number | null; mixed: boolean; styleVariants: number };
+type FigmaInspection = { textCount: number; returnedTextCount: number; fontFamilies: { name: string; count: number }[]; textLayers: FigmaTextLayer[]; warnings: string[] };
+type FigmaFrame = { fileKey: string; nodeId: string; fileName: string; name: string; type: string; width: number; height: number; imagePath: string; inspection: FigmaInspection };
 type FigmaStatus = { connected: boolean; user?: { name: string; email: string }; error?: string };
 
 function BrandLogo() {
@@ -46,6 +48,33 @@ function IssueThumbnail({ src, label }: { src: string; label: string }) {
   // Local canvas output cannot use the hosted image optimizer.
   // eslint-disable-next-line @next/next/no-img-element
   return <img className="issue-thumbnail" src={src} alt={label} />;
+}
+
+function FigmaFrameInspection({ frame }: { frame: FigmaFrame }) {
+  const px = (value: number | null) => value === null ? "—" : `${value}px`;
+  return <div className="figma-result">
+    <div className="figma-preview">{/* The preview is an authenticated same-origin image proxy. */}<img src={frame.imagePath} alt={`${frame.name} 预览`} /><div><small>{frame.fileName}</small><b>{frame.name}</b><span>{frame.type} · {frame.width} × {frame.height}</span></div></div>
+    <section className="figma-inspection" aria-labelledby="figma-inspection-title">
+      <header><div><b id="figma-inspection-title">设计属性检查</b><small>{frame.inspection.textCount} 个文字图层 · {frame.inspection.fontFamilies.length} 种字体</small></div><span>FIGMA 数据</span></header>
+      {frame.inspection.fontFamilies.length > 0 && <div className="figma-fonts">{frame.inspection.fontFamilies.map(font => <span key={font.name}>{font.name}<small>{font.count}</small></span>)}</div>}
+      {frame.inspection.warnings.map(warning => <p className="figma-warning" key={warning}>{warning}</p>)}
+      <div className="figma-layer-list">
+        {frame.inspection.textLayers.length ? frame.inspection.textLayers.map((layer, index) => <details key={layer.id || index}>
+          <summary><span><b>{layer.name}</b><small>{layer.text || "空文字图层"}</small></span><em>{px(layer.fontSize)}</em></summary>
+          <div className="figma-layer-specs">
+            <span><small>字体</small>{layer.fontFamily}{layer.fontWeight ? ` / ${layer.fontWeight}` : ""}</span>
+            <span><small>行高</small>{layer.lineHeight !== null ? px(layer.lineHeight) : layer.lineHeightPercent !== null ? `${layer.lineHeightPercent}%` : "—"}</span>
+            <span><small>字距</small>{px(layer.letterSpacing)}</span>
+            <span><small>颜色</small>{layer.color ?? "混合或未识别"}</span>
+            <span><small>位置</small>距左 {px(layer.x)} / 距顶 {px(layer.y)}</span>
+            <span><small>图层尺寸</small>{px(layer.width)} × {px(layer.height)}</span>
+          </div>
+          {layer.mixed && <p className="figma-mixed">包含 {Math.max(2, layer.styleVariants)} 种局部文字样式，以上为图层基础样式。</p>}
+        </details>) : <p className="figma-no-layers">此 Frame 中没有检测到文字图层。</p>}
+      </div>
+      <footer>属性来自 Figma 节点数据，可作为走查参考；最终渲染仍可能受网页字体加载和浏览器排版影响。</footer>
+    </section>
+  </div>;
 }
 
 const priorityNames: Record<Priority, string> = { P0: "阻塞", P1: "严重", P2: "一般", P3: "建议" };
@@ -250,7 +279,7 @@ export function InspectorWorkspace() {
     </aside>
     {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
     {pageDialogOpen && <PageForm onSave={addPage} onCancel={() => setPageDialogOpen(false)} />}
-    {figmaOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setFigmaOpen(false)}><div className="dialog figma-dialog" role="dialog" aria-modal="true" aria-labelledby="figma-dialog-title" onMouseDown={e => e.stopPropagation()}><div className="figma-dialog-heading"><div><small>FIGMA IMPORT</small><h2 id="figma-dialog-title">从 Figma 导入 Frame</h2></div><IconButton label="关闭" onClick={() => setFigmaOpen(false)}>×</IconButton></div>{figmaStatus?.connected ? <div className="figma-account"><span></span><div><b>{figmaStatus.user?.name ?? "Figma 已连接"}</b><small>{figmaStatus.user?.email || "授权状态有效"}</small></div><button onClick={async () => { await fetch("/api/figma/status", { method: "DELETE" }); setFigmaStatus({ connected: false }); }}>断开</button></div> : <div className="figma-connect"><p>{figmaStatus?.error || "连接 Figma 后可读取你有权限访问的 Frame。"}</p>{!staticHosting && <Button variant="primary" onClick={() => { window.location.href = "/api/figma/auth"; }}>连接 Figma</Button>}</div>}<Field label="Figma Frame 链接"><Input value={figmaUrl} disabled={!figmaStatus?.connected} placeholder="https://www.figma.com/design/...?...node-id=1-2" onChange={e => { setFigmaUrl(e.target.value); setFigmaFrame(null); setFigmaError(""); }} /></Field><div className="figma-link-actions"><Button disabled={!figmaStatus?.connected || !figmaUrl.trim() || figmaLoading} onClick={inspectFigmaFrame}>{figmaLoading ? "正在读取…" : figmaFrame ? "重新同步" : "读取 Frame"}</Button></div>{figmaError && <p className="figma-error">{figmaError}</p>}{figmaFrame && <div className="figma-preview">{/* The preview is an authenticated same-origin image proxy. */}<img src={figmaFrame.imagePath} alt={`${figmaFrame.name} 预览`} /><div><small>{figmaFrame.fileName}</small><b>{figmaFrame.name}</b><span>{figmaFrame.type} · {figmaFrame.width} × {figmaFrame.height}</span></div></div>}<div className="dialog-actions"><Button variant="ghost" onClick={() => setFigmaOpen(false)}>取消</Button><Button variant="primary" disabled={!figmaFrame || figmaLoading} onClick={importFigmaFrame}>导入为设计稿</Button></div></div></div>}
+    {figmaOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setFigmaOpen(false)}><div className="dialog figma-dialog" role="dialog" aria-modal="true" aria-labelledby="figma-dialog-title" onMouseDown={e => e.stopPropagation()}><div className="figma-dialog-heading"><div><small>FIGMA IMPORT</small><h2 id="figma-dialog-title">从 Figma 导入 Frame</h2></div><IconButton label="关闭" onClick={() => setFigmaOpen(false)}>×</IconButton></div>{figmaStatus?.connected ? <div className="figma-account"><span></span><div><b>{figmaStatus.user?.name ?? "Figma 已连接"}</b><small>{figmaStatus.user?.email || "授权状态有效"}</small></div><button onClick={async () => { await fetch("/api/figma/status", { method: "DELETE" }); setFigmaStatus({ connected: false }); }}>断开</button></div> : <div className="figma-connect"><p>{figmaStatus?.error || "连接 Figma 后可读取你有权限访问的 Frame。"}</p>{!staticHosting && <Button variant="primary" onClick={() => { window.location.href = "/api/figma/auth"; }}>连接 Figma</Button>}</div>}<Field label="Figma Frame 链接"><Input value={figmaUrl} disabled={!figmaStatus?.connected} placeholder="https://www.figma.com/design/...?...node-id=1-2" onChange={e => { setFigmaUrl(e.target.value); setFigmaFrame(null); setFigmaError(""); }} /></Field><div className="figma-link-actions"><Button disabled={!figmaStatus?.connected || !figmaUrl.trim() || figmaLoading} onClick={inspectFigmaFrame}>{figmaLoading ? "正在读取…" : figmaFrame ? "重新同步" : "读取 Frame"}</Button></div>{figmaError && <p className="figma-error">{figmaError}</p>}{figmaFrame && <FigmaFrameInspection frame={figmaFrame} />}<div className="dialog-actions"><Button variant="ghost" onClick={() => setFigmaOpen(false)}>取消</Button><Button variant="primary" disabled={!figmaFrame || figmaLoading} onClick={importFigmaFrame}>导入为设计稿</Button></div></div></div>}
     {pageToDelete && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setPageToDelete(null)}><div className="dialog danger-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-page-title" onMouseDown={e => e.stopPropagation()}><h2 id="delete-page-title">删除“{pageToDelete.name}”？</h2><p>该页面下的 {issues.filter(issue => issue.pageId === pageToDelete.id).length} 个问题、页面截图、设计稿和对齐设置都会从本地删除，此操作无法撤销。</p><div className="dialog-actions"><Button variant="ghost" onClick={() => setPageToDelete(null)}>取消</Button><Button className="button--danger" onClick={() => deletePage(pageToDelete)}>确认删除</Button></div></div></div>}
   </main>;
 }

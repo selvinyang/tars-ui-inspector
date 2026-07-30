@@ -23,6 +23,8 @@ npm run build
 3. Copy `.env.example` to `.env.local` and fill in the client ID and client secret.
 4. Start the local app, select **从 Figma 导入**, connect Figma, then paste a URL for a specific Frame.
 
+The Frame reader also provides a design-property inspection panel for text layers, including font family, weight, size, line height, letter spacing, color, relative position, and layer dimensions. Mixed text styles are identified separately instead of being presented as one uniform style.
+
 The client secret and access tokens never enter the browser JavaScript bundle. OAuth tokens are stored in local HttpOnly cookies. The GitHub Pages build intentionally disables Figma OAuth because static hosting cannot exchange authorization codes securely.
 
 This starter does not use `wrangler.jsonc`.
