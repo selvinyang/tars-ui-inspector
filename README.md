@@ -16,6 +16,15 @@ npm run dev
 npm run build
 ```
 
+### Local Figma OAuth
+
+1. Create a Figma OAuth app with `file_content:read` and `current_user:read` scopes.
+2. Add `http://localhost:3000/api/figma/callback` as an exact redirect URL.
+3. Copy `.env.example` to `.env.local` and fill in the client ID and client secret.
+4. Start the local app, select **从 Figma 导入**, connect Figma, then paste a URL for a specific Frame.
+
+The client secret and access tokens never enter the browser JavaScript bundle. OAuth tokens are stored in local HttpOnly cookies. The GitHub Pages build intentionally disables Figma OAuth because static hosting cannot exchange authorization codes securely.
+
 This starter does not use `wrangler.jsonc`.
 
 ## Included Shape

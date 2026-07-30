@@ -13,6 +13,9 @@ const modeOptions = [
   { value: "diff", label: "差异高亮", short: "差异" },
 ] as { value: CompareMode; label: string; short: string }[];
 
+type FigmaFrame = { fileKey: string; nodeId: string; fileName: string; name: string; type: string; width: number; height: number; imagePath: string };
+type FigmaStatus = { connected: boolean; user?: { name: string; email: string }; error?: string };
+
 function BrandLogo() {
   // This bundled SVG is a tiny local UI asset and does not need image optimization.
   // eslint-disable-next-line @next/next/no-img-element
@@ -107,6 +110,13 @@ export function InspectorWorkspace() {
   const [toast, setToast] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [pageDialogOpen, setPageDialogOpen] = useState(false);
+  const [figmaOpen, setFigmaOpen] = useState(false);
+  const [figmaUrl, setFigmaUrl] = useState("");
+  const [figmaStatus, setFigmaStatus] = useState<FigmaStatus | null>(null);
+  const [figmaFrame, setFigmaFrame] = useState<FigmaFrame | null>(null);
+  const [figmaLoading, setFigmaLoading] = useState(false);
+  const [figmaError, setFigmaError] = useState("");
+  const [staticHosting] = useState(() => typeof window !== "undefined" && window.location.hostname.endsWith("github.io"));
   const [pageToDelete, setPageToDelete] = useState<PageItem | null>(null);
   const designInput = useRef<HTMLInputElement>(null);
   const actualInput = useRef<HTMLInputElement>(null);
@@ -149,6 +159,34 @@ export function InspectorWorkspace() {
   function handleFile(e: ChangeEvent<HTMLInputElement>, kind: ImageKind) { loadAsset(e.target.files?.[0], kind); e.target.value = ""; }
   function handleDrop(e: DragEvent) { e.preventDefault(); setDraggingFile(false); loadAsset(e.dataTransfer.files?.[0], actuals[pageId] ? "design" : "actual"); }
   async function removeAsset(kind: ImageKind) { await deleteImage(pageId, kind); const setter = kind === "design" ? setDesigns : setActuals; setter(old => { const next = { ...old }; const source = next[pageId]?.objectUrl; if (source) URL.revokeObjectURL(source); delete next[pageId]; return next; }); setDiffScore(null); showToast(`${kind === "design" ? "设计稿" : "页面截图"}已删除`); }
+  async function openFigmaImport() {
+    setFigmaOpen(true); setFigmaError(""); setFigmaFrame(null);
+    if (staticHosting) return setFigmaStatus({ connected: false, error: "Figma OAuth 仅在本地服务版可用" });
+    try { const response = await fetch("/api/figma/status"); setFigmaStatus(await response.json() as FigmaStatus); }
+    catch { setFigmaStatus({ connected: false, error: "无法连接本地 Figma 服务" }); }
+  }
+  async function inspectFigmaFrame() {
+    setFigmaLoading(true); setFigmaError(""); setFigmaFrame(null);
+    try {
+      const response = await fetch(`/api/figma/frame?url=${encodeURIComponent(figmaUrl.trim())}`);
+      const result = await response.json() as FigmaFrame & { error?: string };
+      if (!response.ok) throw new Error(result.error || "无法读取 Frame");
+      setFigmaFrame(result);
+    } catch (error) { setFigmaError(error instanceof Error ? error.message : "无法读取 Frame"); }
+    finally { setFigmaLoading(false); }
+  }
+  async function importFigmaFrame() {
+    if (!figmaFrame) return;
+    setFigmaLoading(true); setFigmaError("");
+    try {
+      const response = await fetch(figmaFrame.imagePath);
+      if (!response.ok) { const result = await response.json().catch(() => ({})) as { error?: string }; throw new Error(result.error || "无法导出 Frame 图片"); }
+      const blob = await response.blob();
+      loadAsset(new File([blob], `${figmaFrame.name}.png`, { type: blob.type || "image/png" }), "design");
+      setFigmaOpen(false); showToast(`已从 Figma 导入“${figmaFrame.name}”`);
+    } catch (error) { setFigmaError(error instanceof Error ? error.message : "无法导入 Frame"); }
+    finally { setFigmaLoading(false); }
+  }
   function addPage(page: PageItem) { setProjectPages(old => [...old, page]); setPageId(page.id); setPageDialogOpen(false); setSelectedId(null); showToast(`已添加“${page.name}”`); }
   async function deletePage(page: PageItem) {
     if (projectPages.length === 1) return showToast("至少需要保留一个检查页面");
@@ -179,6 +217,7 @@ export function InspectorWorkspace() {
       <input ref={designInput} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => handleFile(e, "design")} />
       <Button onClick={() => actualInput.current?.click()}>{actuals[pageId] ? "更换页面截图" : "上传页面截图"}</Button>
       <Button onClick={() => designInput.current?.click()}>{designs[pageId] ? "更换设计稿" : "上传设计稿"}</Button>
+      <Button onClick={openFigmaImport}>从 Figma 导入</Button>
       <div className="export-wrap"><Button onClick={() => setExportOpen(v => !v)}>导出问题清单</Button>{exportOpen && <div className="export-menu"><button onClick={() => copyText(visibleIssues.map(issue => issueText(issue, projectPages)).join("\n\n────────\n\n"), "全部问题已复制")}>复制全部问题 <span>{visibleIssues.length}</span></button><button onClick={exportInspectionHtml}>导出走查表 HTML</button><button onClick={exportMarkdown}>导出 Markdown</button><button onClick={exportJson}>导出 JSON</button><button onClick={exportCsv}>导出 CSV</button></div>}</div>
     </header>
     <aside className="left-panel">
@@ -211,6 +250,7 @@ export function InspectorWorkspace() {
     </aside>
     {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
     {pageDialogOpen && <PageForm onSave={addPage} onCancel={() => setPageDialogOpen(false)} />}
+    {figmaOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setFigmaOpen(false)}><div className="dialog figma-dialog" role="dialog" aria-modal="true" aria-labelledby="figma-dialog-title" onMouseDown={e => e.stopPropagation()}><div className="figma-dialog-heading"><div><small>FIGMA IMPORT</small><h2 id="figma-dialog-title">从 Figma 导入 Frame</h2></div><IconButton label="关闭" onClick={() => setFigmaOpen(false)}>×</IconButton></div>{figmaStatus?.connected ? <div className="figma-account"><span></span><div><b>{figmaStatus.user?.name ?? "Figma 已连接"}</b><small>{figmaStatus.user?.email || "授权状态有效"}</small></div><button onClick={async () => { await fetch("/api/figma/status", { method: "DELETE" }); setFigmaStatus({ connected: false }); }}>断开</button></div> : <div className="figma-connect"><p>{figmaStatus?.error || "连接 Figma 后可读取你有权限访问的 Frame。"}</p>{!staticHosting && <Button variant="primary" onClick={() => { window.location.href = "/api/figma/auth"; }}>连接 Figma</Button>}</div>}<Field label="Figma Frame 链接"><Input value={figmaUrl} disabled={!figmaStatus?.connected} placeholder="https://www.figma.com/design/...?...node-id=1-2" onChange={e => { setFigmaUrl(e.target.value); setFigmaFrame(null); setFigmaError(""); }} /></Field><div className="figma-link-actions"><Button disabled={!figmaStatus?.connected || !figmaUrl.trim() || figmaLoading} onClick={inspectFigmaFrame}>{figmaLoading ? "正在读取…" : figmaFrame ? "重新同步" : "读取 Frame"}</Button></div>{figmaError && <p className="figma-error">{figmaError}</p>}{figmaFrame && <div className="figma-preview">{/* The preview is an authenticated same-origin image proxy. */}<img src={figmaFrame.imagePath} alt={`${figmaFrame.name} 预览`} /><div><small>{figmaFrame.fileName}</small><b>{figmaFrame.name}</b><span>{figmaFrame.type} · {figmaFrame.width} × {figmaFrame.height}</span></div></div>}<div className="dialog-actions"><Button variant="ghost" onClick={() => setFigmaOpen(false)}>取消</Button><Button variant="primary" disabled={!figmaFrame || figmaLoading} onClick={importFigmaFrame}>导入为设计稿</Button></div></div></div>}
     {pageToDelete && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setPageToDelete(null)}><div className="dialog danger-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-page-title" onMouseDown={e => e.stopPropagation()}><h2 id="delete-page-title">删除“{pageToDelete.name}”？</h2><p>该页面下的 {issues.filter(issue => issue.pageId === pageToDelete.id).length} 个问题、页面截图、设计稿和对齐设置都会从本地删除，此操作无法撤销。</p><div className="dialog-actions"><Button variant="ghost" onClick={() => setPageToDelete(null)}>取消</Button><Button className="button--danger" onClick={() => deletePage(pageToDelete)}>确认删除</Button></div></div></div>}
   </main>;
 }
