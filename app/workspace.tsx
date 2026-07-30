@@ -19,7 +19,7 @@ type FigmaFrame = { fileKey: string; nodeId: string; fileName: string; name: str
 type FigmaStatus = { connected: boolean; user?: { name: string; email: string }; error?: string };
 type InspectableProperty = "fontSize" | "lineHeight" | "letterSpacing" | "x" | "y" | "width" | "height";
 type DevelopmentProperties = Partial<Record<InspectableProperty, number>>;
-type PageSnapshot = { id: string; url: string; title: string; capturedAt: string; viewportWidth: number; viewportHeight: number; pageWidth: number; pageHeight: number; elements: { text: string; tag: string; fontFamily: string; fontWeight: number | null; fontSize: number | null; lineHeight: number | null; letterSpacing: number | null; color: string; x: number; y: number; width: number; height: number }[] };
+type PageSnapshot = { id: string; url: string; title: string; capturedAt: string; viewportWidth: number; viewportHeight: number; pageWidth: number; pageHeight: number; screenshot?: string; elements: { text: string; tag: string; fontFamily: string; fontWeight: number | null; fontSize: number | null; lineHeight: number | null; letterSpacing: number | null; color: string; x: number; y: number; width: number; height: number }[] };
 type CaptureMeta = { url: string; capturedAt: string; matched: number; total: number };
 const propertyLabels: Record<InspectableProperty, string> = { fontSize: "字号", lineHeight: "行高", letterSpacing: "字距", x: "距左", y: "距顶", width: "宽度", height: "高度" };
 
@@ -84,7 +84,7 @@ function FigmaFrameInspection({ frame }: { frame: FigmaFrame }) {
 
 function PropertyInspector({ inspection, values, capture, onChange, onCreateIssue, onClose }: { inspection?: FigmaInspection; values: Record<string, DevelopmentProperties>; capture?: CaptureMeta; onChange: (layerId: string, key: InspectableProperty, value: number) => void; onCreateIssue: (layer: FigmaTextLayer, differences: { key: InspectableProperty; design: number; actual: number; delta: number }[]) => void; onClose: () => void }) {
   const layers = inspection?.textLayers ?? [];
-  const keys: InspectableProperty[] = ["fontSize", "lineHeight", "letterSpacing", "x", "y", "width", "height"];
+  const keys: InspectableProperty[] = ["fontSize", "lineHeight", "letterSpacing", "width", "height"];
   return <aside className="property-inspector" aria-label="设计属性检查">
     <header><div><b>设计属性检查</b><small>{capture ? `已自动匹配 ${capture.matched}/${capture.total} 个文字图层` : "Figma 设计值 / 开发稿人工校准"}</small></div><IconButton label="关闭属性检查" onClick={onClose}>×</IconButton></header>
     {!inspection ? <div className="property-empty"><b>尚无设计属性</b><span>请先从 Figma 读取一个 Frame</span></div> : <div className="property-layer-list">{layers.map((layer, index) => {
@@ -235,9 +235,14 @@ export function InspectorWorkspace() {
   async function collectDevelopmentProperties() {
     setCollectorLoading(true); setCollectorError("");
     try {
-      const response = await fetch(`http://localhost:3001/snapshot?id=${encodeURIComponent(collectorId)}`, { targetAddressSpace: "local" } as RequestInit);
+      const response = await fetch(`http://localhost:3001/snapshot?id=${encodeURIComponent(collectorId)}`, { targetAddressSpace: "loopback" } as RequestInit);
       const snapshot = await response.json() as PageSnapshot & { error?: string };
       if (!response.ok) throw new Error(response.status === 404 ? "尚未收到页面数据。请确认脚本已加入开发页面并刷新该页面。" : snapshot.error || "无法读取页面属性");
+      if (snapshot.screenshot) {
+        const screenshotResponse = await fetch(snapshot.screenshot);
+        const screenshotBlob = await screenshotResponse.blob();
+        loadAsset(new File([screenshotBlob], `${snapshot.title || "开发页面"}-可见区域.jpg`, { type: screenshotBlob.type || "image/jpeg" }), "actual");
+      }
       const inspection = designInspections[pageId]; const used = new Set<number>(); const matchedValues: Record<string, DevelopmentProperties> = {}; let matched = 0;
       const normalize = (value: string) => value.replace(/\s+/g, "").toLowerCase();
       inspection.textLayers.forEach((layer, index) => {
@@ -252,7 +257,7 @@ export function InspectorWorkspace() {
       });
       setDevelopmentProperties(old => ({ ...old, [pageId]: { ...(old[pageId] ?? {}), ...matchedValues } }));
       setCaptureMeta(old => ({ ...old, [pageId]: { url: snapshot.url, capturedAt: snapshot.capturedAt, matched, total: inspection.textLayers.length } }));
-      setCollectorOpen(false); setPropertyOpen(true); showToast(`已自动匹配 ${matched} 个文字图层`);
+      setCollectorOpen(false); setPropertyOpen(true); showToast(`${snapshot.screenshot ? "页面截图已载入，" : ""}已自动匹配 ${matched} 个文字图层`);
     } catch (error) { setCollectorError(error instanceof Error ? error.message : "无法读取页面属性"); }
     finally { setCollectorLoading(false); }
   }

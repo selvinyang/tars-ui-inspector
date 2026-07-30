@@ -25,11 +25,12 @@ const server = http.createServer((request, response) => {
   }
   if (request.method !== "POST") return json(response, 405, { error: "Method not allowed" });
   let body = "";
-  request.on("data", chunk => { body += chunk; if (body.length > 1_500_000) request.destroy(); });
+  request.on("data", chunk => { body += chunk; if (body.length > 15_000_000) request.destroy(); });
   request.on("end", () => {
     try {
       const data = JSON.parse(body); const elements = Array.isArray(data.elements) ? data.elements.slice(0, 500) : [];
-      const snapshot = { id, url: String(data.url || ""), title: String(data.title || ""), capturedAt: new Date().toISOString(), viewportWidth: Number(data.viewportWidth) || 0, viewportHeight: Number(data.viewportHeight) || 0, pageWidth: Number(data.pageWidth) || 0, pageHeight: Number(data.pageHeight) || 0, elements };
+      const screenshot = typeof data.screenshot === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(data.screenshot) ? data.screenshot : "";
+      const snapshot = { id, url: String(data.url || ""), title: String(data.title || ""), capturedAt: new Date().toISOString(), viewportWidth: Number(data.viewportWidth) || 0, viewportHeight: Number(data.viewportHeight) || 0, pageWidth: Number(data.pageWidth) || 0, pageHeight: Number(data.pageHeight) || 0, screenshot, elements };
       snapshots.set(id, snapshot); while (snapshots.size > 20) snapshots.delete(snapshots.keys().next().value);
       json(response, 200, { ok: true, elements: elements.length });
     } catch { json(response, 400, { error: "页面属性数据格式不正确" }); }

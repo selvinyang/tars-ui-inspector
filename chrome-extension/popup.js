@@ -30,16 +30,27 @@ captureButton.addEventListener("click", async () => {
   if (!/^http:\/\/(localhost|127\.0\.0\.1):3001$/.test(serverUrl)) return setStatus("本地地址应为 http://localhost:3001。", "error");
   captureButton.disabled = true; setStatus("正在读取当前页面…");
   try {
+    const serverOrigin = `${new URL(serverUrl).origin}/*`;
+    const hasServerPermission = await chrome.permissions.contains({ origins: [serverOrigin] });
+    if (!hasServerPermission) {
+      setStatus("请在 Chrome 弹窗中允许访问本地采集服务…");
+      const granted = await chrome.permissions.request({ origins: [serverOrigin] });
+      if (!granted) throw new Error("未获得本地服务访问权限，请允许后重试。");
+    }
     await chrome.storage.local.set({ sessionId, serverUrl });
+    const healthResponse = await fetch(`${serverUrl}/health`, { targetAddressSpace: "loopback" });
+    if (!healthResponse.ok) throw new Error(`本地采集服务健康检查失败（${healthResponse.status}）`);
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !/^https?:/.test(tab.url || "")) throw new Error("请在普通 http/https 网页中使用扩展");
     const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: captureVisibleText });
-    const response = await fetch(`${serverUrl}/snapshot?id=${encodeURIComponent(sessionId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result), targetAddressSpace: "local" });
+    const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 88 });
+    result.screenshot = screenshot;
+    const response = await fetch(`${serverUrl}/snapshot?id=${encodeURIComponent(sessionId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result), targetAddressSpace: "loopback" });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `本地采集服务返回 ${response.status}`);
-    setStatus(`采集成功：${payload.elements} 个文字元素。现在返回 Inspector 点击“检查连接并匹配”。`, "success");
+    setStatus(`采集成功：页面截图和 ${payload.elements} 个文字元素。现在返回 Inspector 点击“检查连接并匹配”。`, "success");
   } catch (error) {
     const message = String(error?.message || error);
-    setStatus(message.includes("Cannot access") ? "Chrome 不允许读取这个页面，请切换到普通网站页面后重试。" : message.includes("Failed to fetch") ? "无法连接本地 Inspector，请确认本地服务正在运行。" : message, "error");
+    setStatus(message.includes("Cannot access") ? "Chrome 不允许读取这个页面，请切换到普通网站页面后重试。" : message.includes("Failed to fetch") ? `Chrome 无法访问 ${serverUrl}。请确认扩展已获得本地网站权限。` : message, "error");
   } finally { captureButton.disabled = false; }
 });

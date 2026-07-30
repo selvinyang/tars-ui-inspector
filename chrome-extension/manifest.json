@@ -1,14 +1,24 @@
 {
   "manifest_version": 3,
   "name": "TARS UI Inspector Collector",
-  "version": "0.1.0",
-  "description": "采集当前网页的可见文字样式和布局属性，发送到本地 TARS UI Inspector。",
+  "version": "0.3.1",
+  "description": "采集当前网页的可见截图、文字样式和布局属性，发送到本地 TARS UI Inspector。",
   "minimum_chrome_version": "102",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqqaJppokkkQY2jfbuLC8SI0MXiLNx6dMKfb4qsPsT7gPcW6+ikCtM+CgVHMq3oFStrcrNvV+1319/4RtkCiaKImsdIaAxsGXL2ID4/XDyGfQ8NVRr4J0C6GhFQEfQgl9m9DcV7EaHxDNvIsO+bJg+fDYRNYaIoneCVJQADW1aUfAljRM/d1k1oQvxxOFCM7LfJn/FDcnQY2E8aFHvxzoDxRgWMNb/dKhbS96Vvj5Ny4bl3QVkJ3VKVuD9/Um57vvulhcP6i5eSBmAvxmc+nI5UWhnpOmiJK0o16zhptPKPCP3QmchSwo+CC2hiQLz1CeqISokpzR6deYRIlhN5QkYQIDAQAB",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["http://localhost:3001/*", "http://127.0.0.1:3001/*"],
+  "optional_host_permissions": ["http://localhost:3001/*", "http://127.0.0.1:3001/*"],
+  "icons": {
+    "16": "icon-16.png",
+    "32": "icon-32.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
   "action": {
     "default_title": "TARS UI Inspector Collector",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon-16.png",
+      "32": "icon-32.png"
+    }
   }
 }
