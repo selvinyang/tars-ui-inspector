@@ -29,13 +29,11 @@ After importing a Frame, use **属性检查** in the canvas toolbar to compare t
 
 ### Local development-page collector
 
-After Figma properties are available, select **采集开发属性** and copy the generated script tag into the page being inspected. The local collector reads visible text elements only: computed typography, bounding boxes, the page URL, and viewport dimensions. It does not read form values, cookies, local storage, or network traffic. Refresh the development page, then select **检查连接并匹配** in Inspector. Text content is used as the primary match signal and relative position as the tie-breaker; unmatched layers remain editable manually.
+`npm run dev` starts Inspector on port `3000` and a dedicated local collector receiver on port `3001`. Separating the receiver avoids exposing the application development server to cross-origin extension requests.
 
-For third-party or production websites whose HTML cannot be edited, load the unpacked Manifest V3 extension from [`chrome-extension`](./chrome-extension). Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select that folder. Copy the session ID shown by Inspector into the extension popup and capture the active page. The extension uses temporary `activeTab` access plus `chrome.scripting`; it has host permission only for the local Inspector endpoint.
+Load the unpacked Manifest V3 extension from [`chrome-extension`](./chrome-extension). Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select that folder. Copy the session ID shown by Inspector into the extension popup and capture the active page. The extension reads visible text elements only: computed typography, bounding boxes, the page URL, and viewport dimensions. It does not read form values, cookies, local storage, browsing history, or network traffic.
 
-The unpacked extension uses a stable public ID that is explicitly allowlisted by the local development server. Restart the local Inspector and reload the extension after pulling collector updates; otherwise the previous development server can continue returning `403 Forbidden`.
-
-The collector endpoint intentionally keeps only a small in-memory snapshot for local prototyping. It is disabled in the static GitHub Pages build and is not designed as a hosted collection service.
+The extension uses temporary `activeTab` access plus `chrome.scripting`; its host permission is limited to the local receiver. Chrome may show a Local Network Access permission prompt the first time it connects to localhost. The receiver includes the required local-network preflight response and keeps only a small in-memory snapshot for prototyping. It is unavailable in the static GitHub Pages build and is not designed as a hosted collection service.
 
 The client secret and access tokens never enter the browser JavaScript bundle. OAuth tokens are stored in local HttpOnly cookies. The GitHub Pages build intentionally disables Figma OAuth because static hosting cannot exchange authorization codes securely.
 

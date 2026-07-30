@@ -5,7 +5,7 @@ const status = document.querySelector("#status");
 
 chrome.storage.local.get(["sessionId", "serverUrl"], saved => {
   sessionInput.value = saved.sessionId || "";
-  serverInput.value = saved.serverUrl || "http://localhost:3000";
+  serverInput.value = !saved.serverUrl || /:3000$/.test(saved.serverUrl) ? "http://localhost:3001" : saved.serverUrl;
 });
 
 function setStatus(message, kind = "") { status.textContent = message; status.className = kind; }
@@ -27,16 +27,16 @@ function captureVisibleText() {
 captureButton.addEventListener("click", async () => {
   const sessionId = sessionInput.value.trim(); const serverUrl = serverInput.value.trim().replace(/\/$/, "");
   if (!/^[a-zA-Z0-9-]{8,80}$/.test(sessionId)) return setStatus("请先从 Inspector 复制有效的会话 ID。", "error");
-  if (!/^http:\/\/(localhost|127\.0\.0\.1):3000$/.test(serverUrl)) return setStatus("本地地址应为 http://localhost:3000。", "error");
+  if (!/^http:\/\/(localhost|127\.0\.0\.1):3001$/.test(serverUrl)) return setStatus("本地地址应为 http://localhost:3001。", "error");
   captureButton.disabled = true; setStatus("正在读取当前页面…");
   try {
     await chrome.storage.local.set({ sessionId, serverUrl });
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !/^https?:/.test(tab.url || "")) throw new Error("请在普通 http/https 网页中使用扩展");
     const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: captureVisibleText });
-    const response = await fetch(`${serverUrl}/api/collector/snapshot?id=${encodeURIComponent(sessionId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) });
+    const response = await fetch(`${serverUrl}/snapshot?id=${encodeURIComponent(sessionId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result), targetAddressSpace: "local" });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || (response.status === 403 ? "本地服务拒绝了扩展来源。请重启 Inspector 本地服务，并在 chrome://extensions 重新加载扩展。" : `本地服务返回 ${response.status}`));
+    if (!response.ok) throw new Error(payload.error || `本地采集服务返回 ${response.status}`);
     setStatus(`采集成功：${payload.elements} 个文字元素。现在返回 Inspector 点击“检查连接并匹配”。`, "success");
   } catch (error) {
     const message = String(error?.message || error);

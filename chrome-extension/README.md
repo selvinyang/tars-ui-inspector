@@ -7,6 +7,6 @@
 5. Open the page to inspect, select the extension, paste the session ID, and select **采集当前页面**.
 6. Return to Inspector and select **检查连接并匹配**.
 
-The extension uses `activeTab`, so page access is granted only after the user invokes the extension on the active tab. It requests host access only to the local Inspector endpoint. It does not request cookie, browsing-history, web-request, or all-sites host permissions.
+The extension uses `activeTab`, so page access is granted only after the user invokes the extension on the active tab. It requests host access only to the dedicated receiver at `http://localhost:3001`. It does not request cookie, browsing-history, web-request, or all-sites host permissions.
 
-The manifest contains a public key so the unpacked extension keeps the stable ID `mkkmglbjagilaopdopnockajmiafbcdp`. The local development server allowlists only that ID. After updating the extension or `next.config.ts`, restart Inspector and select **Reload** for the extension in `chrome://extensions`.
+The manifest contains a public key so the unpacked extension keeps the stable ID `mkkmglbjagilaopdopnockajmiafbcdp`. After updating the extension, select **Reload** for it in `chrome://extensions`. Restart `npm run dev` after updating the receiver so both ports `3000` and `3001` are available.
