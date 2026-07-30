@@ -8,3 +8,5 @@
 6. Return to Inspector and select **检查连接并匹配**.
 
 The extension uses `activeTab`, so page access is granted only after the user invokes the extension on the active tab. It requests host access only to the local Inspector endpoint. It does not request cookie, browsing-history, web-request, or all-sites host permissions.
+
+The manifest contains a public key so the unpacked extension keeps the stable ID `mkkmglbjagilaopdopnockajmiafbcdp`. The local development server allowlists only that ID. After updating the extension or `next.config.ts`, restart Inspector and select **Reload** for the extension in `chrome://extensions`.

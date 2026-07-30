@@ -36,7 +36,7 @@ captureButton.addEventListener("click", async () => {
     const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: captureVisibleText });
     const response = await fetch(`${serverUrl}/api/collector/snapshot?id=${encodeURIComponent(sessionId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `本地服务返回 ${response.status}`);
+    if (!response.ok) throw new Error(payload.error || (response.status === 403 ? "本地服务拒绝了扩展来源。请重启 Inspector 本地服务，并在 chrome://extensions 重新加载扩展。" : `本地服务返回 ${response.status}`));
     setStatus(`采集成功：${payload.elements} 个文字元素。现在返回 Inspector 点击“检查连接并匹配”。`, "success");
   } catch (error) {
     const message = String(error?.message || error);

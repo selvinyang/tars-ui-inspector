@@ -33,6 +33,8 @@ After Figma properties are available, select **采集开发属性** and copy the
 
 For third-party or production websites whose HTML cannot be edited, load the unpacked Manifest V3 extension from [`chrome-extension`](./chrome-extension). Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select that folder. Copy the session ID shown by Inspector into the extension popup and capture the active page. The extension uses temporary `activeTab` access plus `chrome.scripting`; it has host permission only for the local Inspector endpoint.
 
+The unpacked extension uses a stable public ID that is explicitly allowlisted by the local development server. Restart the local Inspector and reload the extension after pulling collector updates; otherwise the previous development server can continue returning `403 Forbidden`.
+
 The collector endpoint intentionally keeps only a small in-memory snapshot for local prototyping. It is disabled in the static GitHub Pages build and is not designed as a hosted collection service.
 
 The client secret and access tokens never enter the browser JavaScript bundle. OAuth tokens are stored in local HttpOnly cookies. The GitHub Pages build intentionally disables Figma OAuth because static hosting cannot exchange authorization codes securely.
