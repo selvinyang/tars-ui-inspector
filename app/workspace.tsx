@@ -359,7 +359,6 @@ export function InspectorWorkspace() {
   return <main className="app-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-logo"><BrandLogo /></span><div><b>TARS</b><span>UI Inspector</span></div></div>
-      <div className="url-control"><Input value={currentPage.url} readOnly aria-label="网页地址"/><Button variant="primary">载入页面</Button></div>
       <input ref={actualInput} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => handleFile(e, "actual")} />
       <input ref={designInput} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => handleFile(e, "design")} />
       <Button onClick={() => actualInput.current?.click()}>{actuals[pageId] ? "更换页面截图" : "上传页面截图"}</Button>
