@@ -25,6 +25,8 @@ npm run build
 
 The Frame reader also provides a design-property inspection panel for text layers, including font family, weight, size, line height, letter spacing, color, relative position, and layer dimensions. Mixed text styles are identified separately instead of being presented as one uniform style.
 
+After importing a Frame, use **属性检查** in the canvas toolbar to compare the Figma values with manually calibrated development values. The prototype calculates pixel deltas for typography, position, and dimensions in real time and can convert a confirmed mismatch into an issue. Development values are explicitly marked as manual until DOM/CSS collection is connected.
+
 The client secret and access tokens never enter the browser JavaScript bundle. OAuth tokens are stored in local HttpOnly cookies. The GitHub Pages build intentionally disables Figma OAuth because static hosting cannot exchange authorization codes securely.
 
 This starter does not use `wrangler.jsonc`.

@@ -17,6 +17,9 @@ type FigmaTextLayer = { id: string; name: string; text: string; fontFamily: stri
 type FigmaInspection = { textCount: number; returnedTextCount: number; fontFamilies: { name: string; count: number }[]; textLayers: FigmaTextLayer[]; warnings: string[] };
 type FigmaFrame = { fileKey: string; nodeId: string; fileName: string; name: string; type: string; width: number; height: number; imagePath: string; inspection: FigmaInspection };
 type FigmaStatus = { connected: boolean; user?: { name: string; email: string }; error?: string };
+type InspectableProperty = "fontSize" | "lineHeight" | "letterSpacing" | "x" | "y" | "width" | "height";
+type DevelopmentProperties = Partial<Record<InspectableProperty, number>>;
+const propertyLabels: Record<InspectableProperty, string> = { fontSize: "字号", lineHeight: "行高", letterSpacing: "字距", x: "距左", y: "距顶", width: "宽度", height: "高度" };
 
 function BrandLogo() {
   // This bundled SVG is a tiny local UI asset and does not need image optimization.
@@ -75,6 +78,28 @@ function FigmaFrameInspection({ frame }: { frame: FigmaFrame }) {
       <footer>属性来自 Figma 节点数据，可作为走查参考；最终渲染仍可能受网页字体加载和浏览器排版影响。</footer>
     </section>
   </div>;
+}
+
+function PropertyInspector({ inspection, values, onChange, onCreateIssue, onClose }: { inspection?: FigmaInspection; values: Record<string, DevelopmentProperties>; onChange: (layerId: string, key: InspectableProperty, value: number) => void; onCreateIssue: (layer: FigmaTextLayer, differences: { key: InspectableProperty; design: number; actual: number; delta: number }[]) => void; onClose: () => void }) {
+  const layers = inspection?.textLayers ?? [];
+  const keys: InspectableProperty[] = ["fontSize", "lineHeight", "letterSpacing", "x", "y", "width", "height"];
+  return <aside className="property-inspector" aria-label="设计属性检查">
+    <header><div><b>设计属性检查</b><small>Figma 设计值 / 开发稿人工校准</small></div><IconButton label="关闭属性检查" onClick={onClose}>×</IconButton></header>
+    {!inspection ? <div className="property-empty"><b>尚无设计属性</b><span>请先从 Figma 读取一个 Frame</span></div> : <div className="property-layer-list">{layers.map((layer, index) => {
+      const layerKey = layer.id || String(index); const actual = values[layerKey] ?? {};
+      const differences = keys.flatMap(key => { const design = layer[key]; const current = actual[key]; return typeof design === "number" && typeof current === "number" && design !== current ? [{ key, design, actual: current, delta: Math.round((current - design) * 100) / 100 }] : []; });
+      return <details key={layerKey} open={index === 0}>
+        <summary><span><b>{layer.name}</b><small>{layer.text || "空文字图层"}</small></span><em className={differences.length ? "has-diff" : ""}>{differences.length ? `${differences.length} 项偏差` : "已对齐"}</em></summary>
+        <div className="property-table"><div className="property-table-head"><span>属性</span><span>设计稿</span><span>开发稿</span><span>差值</span></div>{keys.map(key => {
+          const design = layer[key]; if (typeof design !== "number") return null;
+          const current = actual[key] ?? design; const delta = Math.round((current - design) * 100) / 100;
+          return <label key={key}><span>{propertyLabels[key]}</span><b>{design}px</b><input aria-label={`${layer.name}开发稿${propertyLabels[key]}`} type="number" step={key === "letterSpacing" ? .1 : 1} value={current} onChange={event => onChange(layerKey, key, Number(event.target.value))} /><em className={delta === 0 ? "is-zero" : delta > 0 ? "is-positive" : "is-negative"}>{delta === 0 ? "0px" : `${delta > 0 ? "+" : ""}${delta}px`}</em></label>;
+        })}</div>
+        <div className="property-layer-footer"><span>{layer.fontFamily}{layer.fontWeight ? ` · ${layer.fontWeight}` : ""}{layer.color ? ` · ${layer.color}` : ""}</span><Button disabled={!differences.length} onClick={() => onCreateIssue(layer, differences)}>转为问题</Button></div>
+      </details>;
+    })}</div>}
+    <footer>原型阶段：开发稿数据由人工校准；接入网页采集脚本后可自动读取 CSS。</footer>
+  </aside>;
 }
 
 const priorityNames: Record<Priority, string> = { P0: "阻塞", P1: "严重", P2: "一般", P3: "建议" };
@@ -145,6 +170,9 @@ export function InspectorWorkspace() {
   const [figmaFrame, setFigmaFrame] = useState<FigmaFrame | null>(null);
   const [figmaLoading, setFigmaLoading] = useState(false);
   const [figmaError, setFigmaError] = useState("");
+  const [propertyOpen, setPropertyOpen] = useState(false);
+  const [designInspections, setDesignInspections] = useState<Record<string, FigmaInspection>>({});
+  const [developmentProperties, setDevelopmentProperties] = useState<Record<string, Record<string, DevelopmentProperties>>>({});
   const [staticHosting] = useState(() => typeof window !== "undefined" && window.location.hostname.endsWith("github.io"));
   const [pageToDelete, setPageToDelete] = useState<PageItem | null>(null);
   const designInput = useRef<HTMLInputElement>(null);
@@ -158,9 +186,9 @@ export function InspectorWorkspace() {
   const assetHeight = (asset?: DesignAsset) => asset ? device.width * asset.height / asset.width : device.height;
   const canvasHeight = Math.max(device.height, mode === "actual" ? assetHeight(actuals[pageId]) : mode === "design" ? assetHeight(designs[pageId]) : assetHeight(actuals[pageId]), mode === "actual" ? device.height : assetHeight(designs[pageId]));
 
-  useEffect(() => { const raw = localStorage.getItem("tars-inspector-v2"); queueMicrotask(() => { if (raw) { try { const v = JSON.parse(raw); const savedPages = Array.isArray(v.pages) && v.pages.length ? v.pages as PageItem[] : initialPages; setProjectPages(savedPages); if (Array.isArray(v.issues)) setIssues(v.issues); if (v.pageId) setPageId(savedPages.some(page => page.id === v.pageId) ? v.pageId : savedPages[0].id); if (v.deviceId) setDeviceId(devices.some(d => d.id === v.deviceId) ? v.deviceId : "desktop-1440"); if (v.alignments && typeof v.alignments === "object") setAlignments(v.alignments); } catch {} } storageReady.current = true; }); loadImages().then(items => { const nextDesigns: Record<string, DesignAsset> = {}; const nextActuals: Record<string, DesignAsset> = {}; items.forEach(item => { (item.kind === "design" ? nextDesigns : nextActuals)[item.pageId] = item.asset; }); setDesigns(nextDesigns); setActuals(nextActuals); }).catch(() => showToast("本地图片库读取失败")); }, []);
+  useEffect(() => { const raw = localStorage.getItem("tars-inspector-v2"); queueMicrotask(() => { if (raw) { try { const v = JSON.parse(raw); const savedPages = Array.isArray(v.pages) && v.pages.length ? v.pages as PageItem[] : initialPages; setProjectPages(savedPages); if (Array.isArray(v.issues)) setIssues(v.issues); if (v.pageId) setPageId(savedPages.some(page => page.id === v.pageId) ? v.pageId : savedPages[0].id); if (v.deviceId) setDeviceId(devices.some(d => d.id === v.deviceId) ? v.deviceId : "desktop-1440"); if (v.alignments && typeof v.alignments === "object") setAlignments(v.alignments); if (v.designInspections && typeof v.designInspections === "object") setDesignInspections(v.designInspections); if (v.developmentProperties && typeof v.developmentProperties === "object") setDevelopmentProperties(v.developmentProperties); } catch {} } storageReady.current = true; }); loadImages().then(items => { const nextDesigns: Record<string, DesignAsset> = {}; const nextActuals: Record<string, DesignAsset> = {}; items.forEach(item => { (item.kind === "design" ? nextDesigns : nextActuals)[item.pageId] = item.asset; }); setDesigns(nextDesigns); setActuals(nextActuals); }).catch(() => showToast("本地图片库读取失败")); }, []);
   useEffect(() => { const clearDragState = () => setDraggingFile(false); window.addEventListener("dragend", clearDragState); window.addEventListener("drop", clearDragState); window.addEventListener("blur", clearDragState); return () => { window.removeEventListener("dragend", clearDragState); window.removeEventListener("drop", clearDragState); window.removeEventListener("blur", clearDragState); }; }, []);
-  useEffect(() => { if (!storageReady.current) return; localStorage.setItem("tars-inspector-v2", JSON.stringify({ pages: projectPages, issues, pageId, deviceId, alignments })); }, [projectPages, issues, pageId, deviceId, alignments]);
+  useEffect(() => { if (!storageReady.current) return; localStorage.setItem("tars-inspector-v2", JSON.stringify({ pages: projectPages, issues, pageId, deviceId, alignments, designInspections, developmentProperties })); }, [projectPages, issues, pageId, deviceId, alignments, designInspections, developmentProperties]);
   const visibleIssues = useMemo(() => issues.filter(i => i.pageId === pageId && (query === "" || i.title.toLowerCase().includes(query.toLowerCase())) && (priority === "all" || i.priority === priority) && (type === "all" || i.type === type)), [issues, pageId, query, priority, type]);
   const pageIssues = issues.filter(i => i.pageId === pageId && i.deviceId === deviceId);
 
@@ -201,6 +229,16 @@ export function InspectorWorkspace() {
       const result = await response.json() as FigmaFrame & { error?: string };
       if (!response.ok) throw new Error(result.error || "无法读取 Frame");
       setFigmaFrame(result);
+      setDesignInspections(old => ({ ...old, [pageId]: result.inspection }));
+      setDevelopmentProperties(old => {
+        const existing = old[pageId] ?? {};
+        const initialized = { ...existing };
+        result.inspection.textLayers.forEach((layer, index) => {
+          const layerKey = layer.id || String(index);
+          if (!initialized[layerKey]) initialized[layerKey] = { fontSize: layer.fontSize ?? undefined, lineHeight: layer.lineHeight ?? undefined, letterSpacing: layer.letterSpacing ?? undefined, x: layer.x ?? undefined, y: layer.y ?? undefined, width: layer.width ?? undefined, height: layer.height ?? undefined };
+        });
+        return { ...old, [pageId]: initialized };
+      });
       const imageResponse = await fetch(result.imagePath);
       if (!imageResponse.ok) { const imageError = await imageResponse.json().catch(() => ({})) as { error?: string }; throw new Error(imageError.error || "无法导出 Frame 图片"); }
       const blob = await imageResponse.blob();
@@ -228,6 +266,8 @@ export function InspectorWorkspace() {
     const nextPages = projectPages.filter(item => item.id !== page.id);
     setProjectPages(nextPages); setIssues(old => old.filter(issue => issue.pageId !== page.id));
     setAlignments(old => { const next = { ...old }; delete next[page.id]; return next; });
+    setDesignInspections(old => { const next = { ...old }; delete next[page.id]; return next; });
+    setDevelopmentProperties(old => { const next = { ...old }; delete next[page.id]; return next; });
     setDesigns(old => { const next = { ...old }; if (next[page.id]?.objectUrl) URL.revokeObjectURL(next[page.id].objectUrl); delete next[page.id]; return next; });
     setActuals(old => { const next = { ...old }; if (next[page.id]?.objectUrl) URL.revokeObjectURL(next[page.id].objectUrl); delete next[page.id]; return next; });
     if (pageId === page.id) setPageId(nextPages[0].id);
@@ -235,6 +275,13 @@ export function InspectorWorkspace() {
     setSelectedId(null); setPageToDelete(null); showToast(`已删除“${page.name}”及其本地数据`);
   }
   function setAlignment(patch: Partial<Alignment>) { setAlignments(old => ({ ...old, [pageId]: { ...alignment, ...patch } })); setDiffScore(null); }
+  function setDevelopmentProperty(layerId: string, key: InspectableProperty, value: number) { setDevelopmentProperties(old => ({ ...old, [pageId]: { ...(old[pageId] ?? {}), [layerId]: { ...(old[pageId]?.[layerId] ?? {}), [key]: value } } })); }
+  function createPropertyIssue(layer: FigmaTextLayer, differences: { key: InspectableProperty; design: number; actual: number; delta: number }[]) {
+    const summary = differences.map(item => `${propertyLabels[item.key]}：设计稿 ${item.design}px / 开发稿 ${item.actual}px（${item.delta > 0 ? "+" : ""}${item.delta}px）`).join("\n");
+    const typography = differences.some(item => ["fontSize", "lineHeight", "letterSpacing"].includes(item.key));
+    const next: Issue = { id: Math.max(0, ...issues.map(issue => issue.id)) + 1, title: `${layer.name}${differences.length === 1 ? propertyLabels[differences[0].key] : "设计属性"}未对齐`, description: `当前表现：开发稿与 Figma 设计属性存在偏差。\n\n${summary}\n\n数据来源：设计稿属性来自 Figma；开发稿属性为人工校准。`, type: typography ? "字体与颜色" : "布局与间距", priority: "P2", pageId, deviceId, x: Math.max(0, Math.min(100, ((layer.x ?? 0) + (layer.width ?? 0) / 2) / Math.max(1, designs[pageId]?.width ?? device.width) * 100)), y: Math.max(0, Math.min(100, ((layer.y ?? 0) + (layer.height ?? 0) / 2) / Math.max(1, designs[pageId]?.height ?? canvasHeight) * 100)), canvasWidth: device.width, canvasHeight, createdAt: "刚刚" };
+    setEditing(next); setSelectedId(next.id); setPropertyOpen(false);
+  }
   async function copyText(text: string, message: string) { try { await navigator.clipboard.writeText(text); showToast(message); } catch { showToast("复制失败，请检查浏览器权限"); } }
   function exportRows(list: Issue[]) { return list.map(i => { const p = projectPages.find(x => x.id === i.pageId); const d = devices.find(x => x.id === i.deviceId); const width = i.canvasWidth ?? d?.width ?? 0; const height = i.canvasHeight ?? d?.height ?? 0; return { project: "未命名项目", page: p?.name, url: p?.url, device: `${d?.group} ${d?.width} × ${d?.height}`, id: i.id, title: i.title, description: i.description, type: i.type, priority: i.priority, left: Math.round(width * i.x / 100), top: Math.round(height * i.y / 100), xPercent: Math.round(i.x), yPercent: Math.round(i.y), createdAt: i.createdAt }; }); }
   function download(name: string, content: string, typeName: string) { const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([content], { type: typeName })); link.download = name; link.click(); URL.revokeObjectURL(link.href); showToast(`${name} 已导出`); setExportOpen(false); }
@@ -261,7 +308,7 @@ export function InspectorWorkspace() {
       <div className="sidebar-footer"><span className="status-dot"></span><div><b>本地数据已保存</b><small>最近同步：刚刚</small></div></div>
     </aside>
     <section className="workspace">
-      <div className="canvas-toolbar"><Segmented value={mode} options={modeOptions} onChange={setMode} label="对比模式" /><div className="asset-chips">{actuals[pageId] && <span title={actuals[pageId].name}>页面 {actuals[pageId].width}×{actuals[pageId].height}<button onClick={() => removeAsset("actual")}>×</button></span>}{designs[pageId] && <span title={designs[pageId].name}>设计 {designs[pageId].width}×{designs[pageId].height}<button onClick={() => removeAsset("design")}>×</button></span>}</div>{(mode === "overlay" || mode === "diff") && designs[pageId] && <div className="alignment-controls"><label>X <input aria-label="设计稿水平偏移" type="number" value={alignment.x} onChange={e => setAlignment({ x: +e.target.value })} /></label><label>Y <input aria-label="设计稿垂直偏移" type="number" value={alignment.y} onChange={e => setAlignment({ y: +e.target.value })} /></label><label>缩放 <input aria-label="设计稿对齐缩放" type="number" min="0.5" max="2" step="0.01" value={alignment.scale} onChange={e => setAlignment({ scale: +e.target.value })} /></label><button onClick={() => setAlignment({ x: 0, y: 0, scale: 1 })}>重置</button></div>}{mode === "overlay" && <label className="opacity-control"><span>设计稿 {opacity}%</span><input aria-label="设计稿透明度" type="range" min="0" max="100" value={opacity} onChange={e => setOpacity(+e.target.value)} /></label>}{mode === "diff" && diffScore !== null && <span className="diff-score">差异 {diffScore}%</span>}<div className="zoom-control"><IconButton label="缩小" onClick={() => setZoom(Math.max(5, zoom - 10))}>−</IconButton><button onClick={() => setZoom(100)}>{zoom}%</button><IconButton label="放大" onClick={() => setZoom(Math.min(150, zoom + 10))}>＋</IconButton><Button variant="ghost" onClick={() => fitCanvas()}>适应</Button><IconButton label="重置位置" onClick={() => setPosition({ x: 0, y: 0 })}>↺</IconButton></div></div>
+      <div className="canvas-toolbar"><Segmented value={mode} options={modeOptions} onChange={setMode} label="对比模式" /><div className="asset-chips">{actuals[pageId] && <span title={actuals[pageId].name}>页面 {actuals[pageId].width}×{actuals[pageId].height}<button onClick={() => removeAsset("actual")}>×</button></span>}{designs[pageId] && <span title={designs[pageId].name}>设计 {designs[pageId].width}×{designs[pageId].height}<button onClick={() => removeAsset("design")}>×</button></span>}</div>{(mode === "overlay" || mode === "diff") && designs[pageId] && <div className="alignment-controls"><label>X <input aria-label="设计稿水平偏移" type="number" value={alignment.x} onChange={e => setAlignment({ x: +e.target.value })} /></label><label>Y <input aria-label="设计稿垂直偏移" type="number" value={alignment.y} onChange={e => setAlignment({ y: +e.target.value })} /></label><label>缩放 <input aria-label="设计稿对齐缩放" type="number" min="0.5" max="2" step="0.01" value={alignment.scale} onChange={e => setAlignment({ scale: +e.target.value })} /></label><button onClick={() => setAlignment({ x: 0, y: 0, scale: 1 })}>重置</button></div>}{mode === "overlay" && <label className="opacity-control"><span>设计稿 {opacity}%</span><input aria-label="设计稿透明度" type="range" min="0" max="100" value={opacity} onChange={e => setOpacity(+e.target.value)} /></label>}{mode === "diff" && diffScore !== null && <span className="diff-score">差异 {diffScore}%</span>}<Button className={`property-toggle ${propertyOpen ? "is-active" : ""}`} disabled={!designInspections[pageId]} title={designInspections[pageId] ? "比较 Figma 设计值和开发稿属性" : "请先从 Figma 读取设计稿"} onClick={() => setPropertyOpen(value => !value)}>属性检查</Button><div className="zoom-control"><IconButton label="缩小" onClick={() => setZoom(Math.max(5, zoom - 10))}>−</IconButton><button onClick={() => setZoom(100)}>{zoom}%</button><IconButton label="放大" onClick={() => setZoom(Math.min(150, zoom + 10))}>＋</IconButton><Button variant="ghost" onClick={() => fitCanvas()}>适应</Button><IconButton label="重置位置" onClick={() => setPosition({ x: 0, y: 0 })}>↺</IconButton></div></div>
       <div className={`canvas-viewport ${panning ? "is-panning" : ""} ${draggingFile ? "is-file-dragging" : ""}`} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={() => setPanning(false)} onDragEnter={e => { e.preventDefault(); setDraggingFile(true); }} onDragOver={e => e.preventDefault()} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDraggingFile(false); }} onDrop={handleDrop}>
         <div className="canvas-stage-bg" ref={canvasStage}>
           <div className="viewport-label"><span>{currentPage.name}</span><b>{device.width} × {device.height}</b></div>
@@ -273,6 +320,7 @@ export function InspectorWorkspace() {
           {draggingFile && <div className="upload-dropzone"><b>释放以上传{actuals[pageId] ? "设计稿" : "页面截图"}</b><span>PNG、JPG 或 WebP · 最大 20MB</span></div>}
         </div>
         {mode === "diff" && actuals[pageId] && designs[pageId] && <aside className="diff-region-summary"><header><div><b>自动差异区域</b><span>{diffRegions.length} 个建议</span></div><em>截图识别</em></header><div>{diffRegions.map(region => <button key={region.id} onClick={() => createRegionIssue(region)}><strong>#{region.id}</strong><span>{region.width} × {region.height}px</span><small>差异 {region.changedPercent}%</small><i>转为问题</i></button>)}{diffRegions.length === 0 && <p>正在分析主要差异区域…</p>}</div><footer>结果基于截图像素聚类，请人工确认</footer></aside>}
+        {propertyOpen && <PropertyInspector inspection={designInspections[pageId]} values={developmentProperties[pageId] ?? {}} onChange={setDevelopmentProperty} onCreateIssue={createPropertyIssue} onClose={() => setPropertyOpen(false)} />}
       </div>
     </section>
     <aside className="right-panel">
