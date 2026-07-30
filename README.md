@@ -27,6 +27,12 @@ The Frame reader also provides a design-property inspection panel for text layer
 
 After importing a Frame, use **属性检查** in the canvas toolbar to compare the Figma values with manually calibrated development values. The prototype calculates pixel deltas for typography, position, and dimensions in real time and can convert a confirmed mismatch into an issue. Development values are explicitly marked as manual until DOM/CSS collection is connected.
 
+### Local development-page collector
+
+After Figma properties are available, select **采集开发属性** and copy the generated script tag into the page being inspected. The local collector reads visible text elements only: computed typography, bounding boxes, the page URL, and viewport dimensions. It does not read form values, cookies, local storage, or network traffic. Refresh the development page, then select **检查连接并匹配** in Inspector. Text content is used as the primary match signal and relative position as the tie-breaker; unmatched layers remain editable manually.
+
+The collector endpoint intentionally keeps only a small in-memory snapshot for local prototyping. It is disabled in the static GitHub Pages build and is not designed as a hosted collection service.
+
 The client secret and access tokens never enter the browser JavaScript bundle. OAuth tokens are stored in local HttpOnly cookies. The GitHub Pages build intentionally disables Figma OAuth because static hosting cannot exchange authorization codes securely.
 
 This starter does not use `wrangler.jsonc`.

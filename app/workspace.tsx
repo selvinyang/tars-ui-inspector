@@ -19,6 +19,8 @@ type FigmaFrame = { fileKey: string; nodeId: string; fileName: string; name: str
 type FigmaStatus = { connected: boolean; user?: { name: string; email: string }; error?: string };
 type InspectableProperty = "fontSize" | "lineHeight" | "letterSpacing" | "x" | "y" | "width" | "height";
 type DevelopmentProperties = Partial<Record<InspectableProperty, number>>;
+type PageSnapshot = { id: string; url: string; title: string; capturedAt: string; viewportWidth: number; viewportHeight: number; pageWidth: number; pageHeight: number; elements: { text: string; tag: string; fontFamily: string; fontWeight: number | null; fontSize: number | null; lineHeight: number | null; letterSpacing: number | null; color: string; x: number; y: number; width: number; height: number }[] };
+type CaptureMeta = { url: string; capturedAt: string; matched: number; total: number };
 const propertyLabels: Record<InspectableProperty, string> = { fontSize: "字号", lineHeight: "行高", letterSpacing: "字距", x: "距左", y: "距顶", width: "宽度", height: "高度" };
 
 function BrandLogo() {
@@ -80,11 +82,11 @@ function FigmaFrameInspection({ frame }: { frame: FigmaFrame }) {
   </div>;
 }
 
-function PropertyInspector({ inspection, values, onChange, onCreateIssue, onClose }: { inspection?: FigmaInspection; values: Record<string, DevelopmentProperties>; onChange: (layerId: string, key: InspectableProperty, value: number) => void; onCreateIssue: (layer: FigmaTextLayer, differences: { key: InspectableProperty; design: number; actual: number; delta: number }[]) => void; onClose: () => void }) {
+function PropertyInspector({ inspection, values, capture, onChange, onCreateIssue, onClose }: { inspection?: FigmaInspection; values: Record<string, DevelopmentProperties>; capture?: CaptureMeta; onChange: (layerId: string, key: InspectableProperty, value: number) => void; onCreateIssue: (layer: FigmaTextLayer, differences: { key: InspectableProperty; design: number; actual: number; delta: number }[]) => void; onClose: () => void }) {
   const layers = inspection?.textLayers ?? [];
   const keys: InspectableProperty[] = ["fontSize", "lineHeight", "letterSpacing", "x", "y", "width", "height"];
   return <aside className="property-inspector" aria-label="设计属性检查">
-    <header><div><b>设计属性检查</b><small>Figma 设计值 / 开发稿人工校准</small></div><IconButton label="关闭属性检查" onClick={onClose}>×</IconButton></header>
+    <header><div><b>设计属性检查</b><small>{capture ? `已自动匹配 ${capture.matched}/${capture.total} 个文字图层` : "Figma 设计值 / 开发稿人工校准"}</small></div><IconButton label="关闭属性检查" onClick={onClose}>×</IconButton></header>
     {!inspection ? <div className="property-empty"><b>尚无设计属性</b><span>请先从 Figma 读取一个 Frame</span></div> : <div className="property-layer-list">{layers.map((layer, index) => {
       const layerKey = layer.id || String(index); const actual = values[layerKey] ?? {};
       const differences = keys.flatMap(key => { const design = layer[key]; const current = actual[key]; return typeof design === "number" && typeof current === "number" && design !== current ? [{ key, design, actual: current, delta: Math.round((current - design) * 100) / 100 }] : []; });
@@ -98,8 +100,13 @@ function PropertyInspector({ inspection, values, onChange, onCreateIssue, onClos
         <div className="property-layer-footer"><span>{layer.fontFamily}{layer.fontWeight ? ` · ${layer.fontWeight}` : ""}{layer.color ? ` · ${layer.color}` : ""}</span><Button disabled={!differences.length} onClick={() => onCreateIssue(layer, differences)}>转为问题</Button></div>
       </details>;
     })}</div>}
-    <footer>原型阶段：开发稿数据由人工校准；接入网页采集脚本后可自动读取 CSS。</footer>
+    <footer>{capture ? `开发稿 CSS 采集于 ${new Date(capture.capturedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · 未匹配项仍可人工校准` : "尚未采集开发稿 CSS，当前数值可人工校准。"}</footer>
   </aside>;
+}
+
+function CollectorDialog({ id, origin, loading, error, onCopy, onCheck, onClose }: { id: string; origin: string; loading: boolean; error: string; onCopy: (value: string) => void; onCheck: () => void; onClose: () => void }) {
+  const snippet = `<script src="${origin}/api/collector/client.js?id=${id}"></script>`;
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}><div className="dialog collector-dialog" role="dialog" aria-modal="true" aria-labelledby="collector-title" onMouseDown={event => event.stopPropagation()}><div className="collector-heading"><div><small>DEVELOPMENT CSS</small><h2 id="collector-title">采集开发页面属性</h2></div><IconButton label="关闭" onClick={onClose}>×</IconButton></div><div className="collector-steps"><span>1</span><p>把下面的脚本加入待检查页面的 HTML，建议放在 <code>&lt;/body&gt;</code> 前。本地开发环境刷新页面后会自动采集。</p></div><div className="collector-code"><code>{snippet}</code><Button onClick={() => onCopy(snippet)}>复制脚本</Button></div><div className="collector-steps"><span>2</span><p>将待检查页面调整为与设计稿相同的视口宽度，然后点击检查连接。</p></div>{error && <p className="collector-error">{error}</p>}<div className="collector-notice">仅采集可见文字元素的计算样式、位置和尺寸，不采集输入内容、Cookie 或网络请求。</div><div className="dialog-actions"><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" disabled={loading || !id} onClick={onCheck}>{loading ? "正在匹配…" : "检查连接并匹配"}</Button></div></div></div>;
 }
 
 const priorityNames: Record<Priority, string> = { P0: "阻塞", P1: "严重", P2: "一般", P3: "建议" };
@@ -173,6 +180,11 @@ export function InspectorWorkspace() {
   const [propertyOpen, setPropertyOpen] = useState(false);
   const [designInspections, setDesignInspections] = useState<Record<string, FigmaInspection>>({});
   const [developmentProperties, setDevelopmentProperties] = useState<Record<string, Record<string, DevelopmentProperties>>>({});
+  const [captureMeta, setCaptureMeta] = useState<Record<string, CaptureMeta>>({});
+  const [collectorOpen, setCollectorOpen] = useState(false);
+  const [collectorId, setCollectorId] = useState("collector-session");
+  const [collectorLoading, setCollectorLoading] = useState(false);
+  const [collectorError, setCollectorError] = useState("");
   const [staticHosting] = useState(() => typeof window !== "undefined" && window.location.hostname.endsWith("github.io"));
   const [pageToDelete, setPageToDelete] = useState<PageItem | null>(null);
   const designInput = useRef<HTMLInputElement>(null);
@@ -186,9 +198,9 @@ export function InspectorWorkspace() {
   const assetHeight = (asset?: DesignAsset) => asset ? device.width * asset.height / asset.width : device.height;
   const canvasHeight = Math.max(device.height, mode === "actual" ? assetHeight(actuals[pageId]) : mode === "design" ? assetHeight(designs[pageId]) : assetHeight(actuals[pageId]), mode === "actual" ? device.height : assetHeight(designs[pageId]));
 
-  useEffect(() => { const raw = localStorage.getItem("tars-inspector-v2"); queueMicrotask(() => { if (raw) { try { const v = JSON.parse(raw); const savedPages = Array.isArray(v.pages) && v.pages.length ? v.pages as PageItem[] : initialPages; setProjectPages(savedPages); if (Array.isArray(v.issues)) setIssues(v.issues); if (v.pageId) setPageId(savedPages.some(page => page.id === v.pageId) ? v.pageId : savedPages[0].id); if (v.deviceId) setDeviceId(devices.some(d => d.id === v.deviceId) ? v.deviceId : "desktop-1440"); if (v.alignments && typeof v.alignments === "object") setAlignments(v.alignments); if (v.designInspections && typeof v.designInspections === "object") setDesignInspections(v.designInspections); if (v.developmentProperties && typeof v.developmentProperties === "object") setDevelopmentProperties(v.developmentProperties); } catch {} } storageReady.current = true; }); loadImages().then(items => { const nextDesigns: Record<string, DesignAsset> = {}; const nextActuals: Record<string, DesignAsset> = {}; items.forEach(item => { (item.kind === "design" ? nextDesigns : nextActuals)[item.pageId] = item.asset; }); setDesigns(nextDesigns); setActuals(nextActuals); }).catch(() => showToast("本地图片库读取失败")); }, []);
+  useEffect(() => { const raw = localStorage.getItem("tars-inspector-v2"); queueMicrotask(() => { if (raw) { try { const v = JSON.parse(raw); const savedPages = Array.isArray(v.pages) && v.pages.length ? v.pages as PageItem[] : initialPages; setProjectPages(savedPages); if (Array.isArray(v.issues)) setIssues(v.issues); if (v.pageId) setPageId(savedPages.some(page => page.id === v.pageId) ? v.pageId : savedPages[0].id); if (v.deviceId) setDeviceId(devices.some(d => d.id === v.deviceId) ? v.deviceId : "desktop-1440"); if (v.alignments && typeof v.alignments === "object") setAlignments(v.alignments); if (v.designInspections && typeof v.designInspections === "object") setDesignInspections(v.designInspections); if (v.developmentProperties && typeof v.developmentProperties === "object") setDevelopmentProperties(v.developmentProperties); if (v.captureMeta && typeof v.captureMeta === "object") setCaptureMeta(v.captureMeta); } catch {} } storageReady.current = true; }); loadImages().then(items => { const nextDesigns: Record<string, DesignAsset> = {}; const nextActuals: Record<string, DesignAsset> = {}; items.forEach(item => { (item.kind === "design" ? nextDesigns : nextActuals)[item.pageId] = item.asset; }); setDesigns(nextDesigns); setActuals(nextActuals); }).catch(() => showToast("本地图片库读取失败")); }, []);
   useEffect(() => { const clearDragState = () => setDraggingFile(false); window.addEventListener("dragend", clearDragState); window.addEventListener("drop", clearDragState); window.addEventListener("blur", clearDragState); return () => { window.removeEventListener("dragend", clearDragState); window.removeEventListener("drop", clearDragState); window.removeEventListener("blur", clearDragState); }; }, []);
-  useEffect(() => { if (!storageReady.current) return; localStorage.setItem("tars-inspector-v2", JSON.stringify({ pages: projectPages, issues, pageId, deviceId, alignments, designInspections, developmentProperties })); }, [projectPages, issues, pageId, deviceId, alignments, designInspections, developmentProperties]);
+  useEffect(() => { if (!storageReady.current) return; localStorage.setItem("tars-inspector-v2", JSON.stringify({ pages: projectPages, issues, pageId, deviceId, alignments, designInspections, developmentProperties, captureMeta })); }, [projectPages, issues, pageId, deviceId, alignments, designInspections, developmentProperties, captureMeta]);
   const visibleIssues = useMemo(() => issues.filter(i => i.pageId === pageId && (query === "" || i.title.toLowerCase().includes(query.toLowerCase())) && (priority === "all" || i.priority === priority) && (type === "all" || i.type === type)), [issues, pageId, query, priority, type]);
   const pageIssues = issues.filter(i => i.pageId === pageId && i.deviceId === deviceId);
 
@@ -216,6 +228,35 @@ export function InspectorWorkspace() {
   function handleFile(e: ChangeEvent<HTMLInputElement>, kind: ImageKind) { loadAsset(e.target.files?.[0], kind); e.target.value = ""; }
   function handleDrop(e: DragEvent) { e.preventDefault(); setDraggingFile(false); loadAsset(e.dataTransfer.files?.[0], actuals[pageId] ? "design" : "actual"); }
   async function removeAsset(kind: ImageKind) { await deleteImage(pageId, kind); const setter = kind === "design" ? setDesigns : setActuals; setter(old => { const next = { ...old }; const source = next[pageId]?.objectUrl; if (source) URL.revokeObjectURL(source); delete next[pageId]; return next; }); setDiffScore(null); showToast(`${kind === "design" ? "设计稿" : "页面截图"}已删除`); }
+  function openCollector() {
+    if (staticHosting) return showToast("页面采集脚本仅在本地服务版可用");
+    if (!designInspections[pageId]) return showToast("请先从 Figma 读取设计稿属性");
+    setCollectorId(crypto.randomUUID()); setCollectorError(""); setCollectorOpen(true);
+  }
+  async function collectDevelopmentProperties() {
+    setCollectorLoading(true); setCollectorError("");
+    try {
+      const response = await fetch(`/api/collector/snapshot?id=${encodeURIComponent(collectorId)}`);
+      const snapshot = await response.json() as PageSnapshot & { error?: string };
+      if (!response.ok) throw new Error(response.status === 404 ? "尚未收到页面数据。请确认脚本已加入开发页面并刷新该页面。" : snapshot.error || "无法读取页面属性");
+      const inspection = designInspections[pageId]; const used = new Set<number>(); const matchedValues: Record<string, DevelopmentProperties> = {}; let matched = 0;
+      const normalize = (value: string) => value.replace(/\s+/g, "").toLowerCase();
+      inspection.textLayers.forEach((layer, index) => {
+        const target = normalize(layer.text); if (!target) return;
+        const candidates = snapshot.elements.map((element, elementIndex) => ({ element, elementIndex, text: normalize(element.text) })).filter(item => !used.has(item.elementIndex) && (item.text === target || (target.length > 3 && (item.text.includes(target) || target.includes(item.text)))));
+        const best = candidates.sort((a, b) => {
+          const exactA = a.text === target ? 0 : 10000; const exactB = b.text === target ? 0 : 10000;
+          return exactA + Math.abs(a.element.x - (layer.x ?? 0)) + Math.abs(a.element.y - (layer.y ?? 0)) - exactB - Math.abs(b.element.x - (layer.x ?? 0)) - Math.abs(b.element.y - (layer.y ?? 0));
+        })[0];
+        if (!best) return; used.add(best.elementIndex); matched += 1;
+        matchedValues[layer.id || String(index)] = { fontSize: best.element.fontSize ?? undefined, lineHeight: best.element.lineHeight ?? undefined, letterSpacing: best.element.letterSpacing ?? undefined, x: best.element.x, y: best.element.y, width: best.element.width, height: best.element.height };
+      });
+      setDevelopmentProperties(old => ({ ...old, [pageId]: { ...(old[pageId] ?? {}), ...matchedValues } }));
+      setCaptureMeta(old => ({ ...old, [pageId]: { url: snapshot.url, capturedAt: snapshot.capturedAt, matched, total: inspection.textLayers.length } }));
+      setCollectorOpen(false); setPropertyOpen(true); showToast(`已自动匹配 ${matched} 个文字图层`);
+    } catch (error) { setCollectorError(error instanceof Error ? error.message : "无法读取页面属性"); }
+    finally { setCollectorLoading(false); }
+  }
   async function openFigmaImport() {
     setFigmaOpen(true); setFigmaError(""); setFigmaFrame(null);
     if (staticHosting) return setFigmaStatus({ connected: false, error: "Figma OAuth 仅在本地服务版可用" });
@@ -268,6 +309,7 @@ export function InspectorWorkspace() {
     setAlignments(old => { const next = { ...old }; delete next[page.id]; return next; });
     setDesignInspections(old => { const next = { ...old }; delete next[page.id]; return next; });
     setDevelopmentProperties(old => { const next = { ...old }; delete next[page.id]; return next; });
+    setCaptureMeta(old => { const next = { ...old }; delete next[page.id]; return next; });
     setDesigns(old => { const next = { ...old }; if (next[page.id]?.objectUrl) URL.revokeObjectURL(next[page.id].objectUrl); delete next[page.id]; return next; });
     setActuals(old => { const next = { ...old }; if (next[page.id]?.objectUrl) URL.revokeObjectURL(next[page.id].objectUrl); delete next[page.id]; return next; });
     if (pageId === page.id) setPageId(nextPages[0].id);
@@ -299,6 +341,7 @@ export function InspectorWorkspace() {
       <Button onClick={() => actualInput.current?.click()}>{actuals[pageId] ? "更换页面截图" : "上传页面截图"}</Button>
       <Button onClick={() => designInput.current?.click()}>{designs[pageId] ? "更换设计稿" : "上传设计稿"}</Button>
       <Button onClick={openFigmaImport}>从 Figma 导入</Button>
+      <Button disabled={!designInspections[pageId]} title={designInspections[pageId] ? "从开发页面自动读取 CSS" : "请先从 Figma 导入 Frame"} onClick={openCollector}>采集开发属性</Button>
       <div className="export-wrap"><Button onClick={() => setExportOpen(v => !v)}>导出问题清单</Button>{exportOpen && <div className="export-menu"><button onClick={() => copyText(visibleIssues.map(issue => issueText(issue, projectPages)).join("\n\n────────\n\n"), "全部问题已复制")}>复制全部问题 <span>{visibleIssues.length}</span></button><button onClick={exportInspectionHtml}>导出走查表 HTML</button><button onClick={exportMarkdown}>导出 Markdown</button><button onClick={exportJson}>导出 JSON</button><button onClick={exportCsv}>导出 CSV</button></div>}</div>
     </header>
     <aside className="left-panel">
@@ -320,7 +363,7 @@ export function InspectorWorkspace() {
           {draggingFile && <div className="upload-dropzone"><b>释放以上传{actuals[pageId] ? "设计稿" : "页面截图"}</b><span>PNG、JPG 或 WebP · 最大 20MB</span></div>}
         </div>
         {mode === "diff" && actuals[pageId] && designs[pageId] && <aside className="diff-region-summary"><header><div><b>自动差异区域</b><span>{diffRegions.length} 个建议</span></div><em>截图识别</em></header><div>{diffRegions.map(region => <button key={region.id} onClick={() => createRegionIssue(region)}><strong>#{region.id}</strong><span>{region.width} × {region.height}px</span><small>差异 {region.changedPercent}%</small><i>转为问题</i></button>)}{diffRegions.length === 0 && <p>正在分析主要差异区域…</p>}</div><footer>结果基于截图像素聚类，请人工确认</footer></aside>}
-        {propertyOpen && <PropertyInspector inspection={designInspections[pageId]} values={developmentProperties[pageId] ?? {}} onChange={setDevelopmentProperty} onCreateIssue={createPropertyIssue} onClose={() => setPropertyOpen(false)} />}
+        {propertyOpen && <PropertyInspector inspection={designInspections[pageId]} values={developmentProperties[pageId] ?? {}} capture={captureMeta[pageId]} onChange={setDevelopmentProperty} onCreateIssue={createPropertyIssue} onClose={() => setPropertyOpen(false)} />}
       </div>
     </section>
     <aside className="right-panel">
@@ -332,6 +375,7 @@ export function InspectorWorkspace() {
     </aside>
     {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
     {pageDialogOpen && <PageForm onSave={addPage} onCancel={() => setPageDialogOpen(false)} />}
+    {collectorOpen && <CollectorDialog id={collectorId} origin={typeof window === "undefined" ? "http://localhost:3000" : window.location.origin} loading={collectorLoading} error={collectorError} onCopy={value => copyText(value, "页面采集脚本已复制")} onCheck={collectDevelopmentProperties} onClose={() => setCollectorOpen(false)} />}
     {figmaOpen && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setFigmaOpen(false)}><div className="dialog figma-dialog" role="dialog" aria-modal="true" aria-labelledby="figma-dialog-title" onMouseDown={e => e.stopPropagation()}><div className="figma-dialog-heading"><div><small>FIGMA IMPORT</small><h2 id="figma-dialog-title">从 Figma 导入 Frame</h2></div><IconButton label="关闭" onClick={() => setFigmaOpen(false)}>×</IconButton></div>{figmaStatus?.connected ? <div className="figma-account"><span></span><div><b>{figmaStatus.user?.name ?? "Figma 已连接"}</b><small>{figmaStatus.user?.email || "授权状态有效"}</small></div><button onClick={async () => { await fetch("/api/figma/status", { method: "DELETE" }); setFigmaStatus({ connected: false }); }}>断开</button></div> : <div className="figma-connect"><p>{figmaStatus?.error || "连接 Figma 后可读取你有权限访问的 Frame。"}</p>{!staticHosting && <Button variant="primary" onClick={() => { window.location.href = "/api/figma/auth"; }}>连接 Figma</Button>}</div>}<Field label="Figma Frame 链接"><Input value={figmaUrl} disabled={!figmaStatus?.connected} placeholder="https://www.figma.com/design/...?...node-id=1-2" onChange={e => { setFigmaUrl(e.target.value); setFigmaFrame(null); setFigmaError(""); }} /></Field><div className="figma-link-actions"><Button disabled={!figmaStatus?.connected || !figmaUrl.trim() || figmaLoading} onClick={inspectFigmaFrame}>{figmaLoading ? "正在读取并载入…" : figmaFrame ? "重新读取并展示" : "读取并在画布展示"}</Button></div>{figmaError && <p className="figma-error">{figmaError}</p>}{figmaFrame && <FigmaFrameInspection frame={figmaFrame} />}<div className="dialog-actions"><Button variant="ghost" onClick={() => setFigmaOpen(false)}>取消</Button>{figmaFrame && <Button variant="primary" disabled={figmaLoading} onClick={importFigmaFrame}>重试在画布展示</Button>}</div></div></div>}
     {pageToDelete && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setPageToDelete(null)}><div className="dialog danger-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-page-title" onMouseDown={e => e.stopPropagation()}><h2 id="delete-page-title">删除“{pageToDelete.name}”？</h2><p>该页面下的 {issues.filter(issue => issue.pageId === pageToDelete.id).length} 个问题、页面截图、设计稿和对齐设置都会从本地删除，此操作无法撤销。</p><div className="dialog-actions"><Button variant="ghost" onClick={() => setPageToDelete(null)}>取消</Button><Button className="button--danger" onClick={() => deletePage(pageToDelete)}>确认删除</Button></div></div></div>}
   </main>;
