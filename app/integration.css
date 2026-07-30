@@ -1,4 +1,6 @@
 .integration-trigger{display:flex;align-items:center;gap:7px}
+.topbar{position:relative}
+.topbar-actions{position:absolute;left:50%;display:flex;align-items:center;gap:10px;transform:translateX(-50%)}
 .topbar .export-wrap{margin-left:auto}
 .integration-trigger span{min-width:25px;padding:2px 5px;border-radius:4px;background:#303238;color:#9b9ba1;font-size:9px}
 .integration-trigger.setup-0{border-color:#8a6332;color:#f0b66d;background:rgba(230,150,61,.08)}
@@ -38,4 +40,5 @@
 .integration-card>.button{width:100%}
 .integration-panel>footer{display:flex;align-items:center;justify-content:space-between;margin-top:18px;padding-top:14px;border-top:1px solid #303236}
 .integration-panel>footer span{color:#6e6e73;font-size:9px}
+@media(max-width:1120px){.topbar-actions{display:none}}
 @media(max-width:700px){.integration-panel{width:100%;padding:18px}.integration-online-note>div{flex-direction:column}}

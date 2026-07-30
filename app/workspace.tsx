@@ -361,9 +361,11 @@ export function InspectorWorkspace() {
       <div className="brand"><span className="brand-logo"><BrandLogo /></span><div><b>TARS</b><span>UI Inspector</span></div></div>
       <input ref={actualInput} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => handleFile(e, "actual")} />
       <input ref={designInput} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={e => handleFile(e, "design")} />
-      <Button onClick={() => actualInput.current?.click()}>{actuals[pageId] ? "更换页面截图" : "上传页面截图"}</Button>
-      <Button onClick={() => designInput.current?.click()}>{designs[pageId] ? "更换设计稿" : "上传设计稿"}</Button>
-      <Button className={`integration-trigger setup-${integrationCount}`} title={integrationCount < 2 ? "开始走查前，请先配置设计稿和开发页面" : "查看或修改走查环境"} onClick={() => setIntegrationOpen(true)}>{integrationCount === 0 ? "配置走查环境" : integrationCount === 1 ? "继续配置" : "走查设置"} <span>{integrationCount}/2</span></Button>
+      <div className="topbar-actions">
+        <Button onClick={() => actualInput.current?.click()}>{actuals[pageId] ? "更换页面截图" : "上传页面截图"}</Button>
+        <Button onClick={() => designInput.current?.click()}>{designs[pageId] ? "更换设计稿" : "上传设计稿"}</Button>
+        <Button className={`integration-trigger setup-${integrationCount}`} title={integrationCount < 2 ? "开始走查前，请先配置设计稿和开发页面" : "查看或修改走查环境"} onClick={() => setIntegrationOpen(true)}>{integrationCount === 0 ? "配置走查环境" : integrationCount === 1 ? "继续配置" : "走查设置"} <span>{integrationCount}/2</span></Button>
+      </div>
       <div className="export-wrap"><Button onClick={() => setExportOpen(v => !v)}>导出问题清单</Button>{exportOpen && <div className="export-menu"><button onClick={() => copyText(visibleIssues.map(issue => issueText(issue, projectPages)).join("\n\n────────\n\n"), "全部问题已复制")}>复制全部问题 <span>{visibleIssues.length}</span></button><button onClick={exportInspectionHtml}>导出走查表 HTML</button><button onClick={exportMarkdown}>导出 Markdown</button><button onClick={exportJson}>导出 JSON</button><button onClick={exportCsv}>导出 CSV</button></div>}</div>
     </header>
     <aside className="left-panel">
