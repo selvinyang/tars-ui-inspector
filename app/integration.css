@@ -38,6 +38,9 @@
 .integration-card li b{display:block;margin-bottom:1px;color:#d8d8db;font-size:10px;font-weight:500}
 .integration-card code{padding:1px 4px;border-radius:3px;background:#17181a;color:#b9c8d9;font-size:9px}
 .integration-card>.button{width:100%}
+.integration-card-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.integration-card-actions .button{width:100%}
+.download-extension{display:flex;align-items:center;justify-content:center;text-decoration:none}
 .integration-panel>footer{display:flex;align-items:center;justify-content:space-between;margin-top:18px;padding-top:14px;border-top:1px solid #303236}
 .integration-panel>footer span{color:#6e6e73;font-size:9px}
 @media(max-width:1120px){.topbar-actions{display:none}}
