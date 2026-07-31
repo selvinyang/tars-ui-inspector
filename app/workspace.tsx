@@ -6,7 +6,7 @@ import type { CompareMode, DesignAsset, DeviceGroup, Issue, IssueType, PageItem,
 import { Button, Field, IconButton, Input, Segmented, Select } from "./ui";
 import { deleteImage, loadImages, saveImage, type ImageKind } from "./image-store";
 import { DiffCanvas, ImageSurface, type Alignment, type DifferenceRegion } from "./comparison";
-import { autoMatch, candidateLabel, componentPropertyKeys, elementProperties, inspectionLayers, propertyDifferences, propertyLabels, textPropertyKeys, type DevelopmentProperties, type FigmaInspection, type FigmaLayer, type InspectableProperty, type MatchRecord, type PageSnapshot, type PropertyDifference, type PropertyValue, type SnapshotElement } from "./inspection-model";
+import { autoMatch, candidateLabel, componentPropertyKeys, dedupeLayerDifferences, differenceGroupLabels, elementProperties, groupPropertyDifferences, inspectionLayers, inspectionStateSummary, propertyDifferences, propertyLabels, textPropertyKeys, type DevelopmentProperties, type DifferenceGroup, type FigmaInspection, type FigmaLayer, type InspectableProperty, type MatchRecord, type PageSnapshot, type PropertyDifference, type PropertyValue, type SnapshotElement } from "./inspection-model";
 
 const modeOptions = [
   { value: "actual", label: "实际网页", short: "实际" }, { value: "design", label: "设计稿", short: "设计" },
@@ -76,23 +76,26 @@ function FigmaFrameInspection({ frame }: { frame: FigmaFrame }) {
 
 function PropertyInspector({ inspection, values, capture, elements, matches, onChange, onRematch, onCreateIssue, onClose }: { inspection?: FigmaInspection; values: Record<string, DevelopmentProperties>; capture?: CaptureMeta; elements: SnapshotElement[]; matches: Record<string, MatchRecord>; onChange: (layerId: string, key: InspectableProperty, value: PropertyValue) => void; onRematch: (layerId: string, elementIndex: number) => void; onCreateIssue: (layer: FigmaLayer, differences: PropertyDifference[]) => void; onClose: () => void }) {
   const layers = inspectionLayers(inspection);
+  const entries = dedupeLayerDifferences(layers.map((layer, index) => ({ layer, differences: propertyDifferences(layer, values[layer.id || String(index)] ?? {}) })));
+  const state = inspectionStateSummary(layers, elements, matches);
+  const totals = entries.flatMap(entry => entry.differences).reduce<Record<DifferenceGroup, number>>((result, difference) => { const group = groupPropertyDifferences([difference])[0]?.group ?? "state"; result[group] += 1; return result; }, { text: 0, container: 0, layout: 0, state: state.missing + state.extra + state.content });
   const valueText = (value: PropertyValue | null | undefined, key: InspectableProperty) => value == null ? "—" : typeof value === "number" ? `${value}${["fontWeight"].includes(key) ? "" : "px"}` : value;
   return <aside className="property-inspector" aria-label="设计属性检查">
     <header><div><b>设计属性检查</b><small>{capture ? `已匹配 ${capture.matched}/${capture.total} · 文字 ${capture.textMatched ?? 0} · 组件 ${capture.componentMatched ?? 0}` : "等待采集开发页面并自动匹配"}</small></div><IconButton label="关闭属性检查" onClick={onClose}>×</IconButton></header>
-    {!inspection ? <div className="property-empty"><b>尚无设计属性</b><span>请先从 Figma 读取一个 Frame</span></div> : <div className="property-layer-list">{layers.map((layer, index) => {
+    {!inspection ? <div className="property-empty"><b>尚无设计属性</b><span>请先从 Figma 读取一个 Frame</span></div> : <><div className="difference-groups">{(["text", "container", "layout", "state"] as DifferenceGroup[]).map(group => <div key={group} className={totals[group] ? "has-diff" : "is-clear"}><span>{differenceGroupLabels[group]}</span><b>{totals[group]}</b></div>)}</div><div className="noise-summary"><b>已启用降噪</b><span>忽略尺寸 ≤ 1px、轻微色差与整体页面偏移；同一父组件的重复项已合并。</span></div>{totals.state > 0 && <div className="state-summary"><span><b>{state.missing}</b> 缺失元素</span><span><b>{state.extra}</b> 多余元素</span><span><b>{state.content}</b> 内容不同</span></div>}<div className="property-layer-list">{layers.map((layer, index) => {
       const layerKey = layer.id || String(index); const actual = values[layerKey] ?? {};
-      const keys = layer.kind === "text" ? textPropertyKeys : componentPropertyKeys; const differences = propertyDifferences(layer, actual); const match = matches[layerKey];
+      const keys = layer.kind === "text" ? textPropertyKeys : componentPropertyKeys; const differences = entries[index]?.differences ?? []; const grouped = groupPropertyDifferences(differences); const match = matches[layerKey];
       return <details key={layerKey} open={index === 0}>
         <summary><span><b>{layer.name}<i>{layer.kind === "text" ? "文字" : "组件"}</i></b><small>{layer.kind === "text" ? layer.text || "空文字图层" : layer.nodeType}</small></span><em className={differences.length ? "has-diff" : ""}>{match ? `${match.confidence}% · ${differences.length} 项偏差` : "未匹配"}</em></summary>
         <div className="property-match"><label><span>开发元素</span><select aria-label={`${layer.name}匹配的开发元素`} value={match?.elementIndex ?? ""} onChange={event => onRematch(layerKey, Number(event.target.value))}><option value="">选择元素重新配对</option>{elements.map((element, elementIndex) => <option key={`${element.selector}-${elementIndex}`} value={elementIndex}>{candidateLabel(element)}</option>)}</select></label><small>{match ? `${match.method === "manual" ? "手动配对" : "自动匹配"} · 置信度 ${match.confidence}%` : "自动匹配失败，可手动选择开发元素"}</small></div>
-        <div className="property-table"><div className="property-table-head"><span>属性</span><span>设计稿</span><span>开发稿</span><span>差值</span></div>{keys.map(key => {
+        <div className="property-table"><div className="property-table-head"><span>属性</span><span>设计稿</span><span>开发稿</span><span>差值</span></div>{grouped.map(group => <div className="property-group" key={group.group}><div className="property-group-title">{group.label}<span>{group.differences.length}</span></div>{keys.filter(key => group.differences.some(item => item.key === key)).map(key => {
           const design = layer[key as keyof FigmaLayer]; if (typeof design !== "number" && typeof design !== "string") return null;
           const current = actual[key]; const difference = differences.find(item => item.key === key); const numeric = typeof design === "number";
           return <label key={key}><span>{propertyLabels[key]}</span><b title={String(design)}>{valueText(design, key)}</b><input aria-label={`${layer.name}开发稿${propertyLabels[key]}`} type={numeric ? "number" : "text"} step={key === "letterSpacing" ? .1 : 1} value={current ?? ""} placeholder="未采集" onChange={event => onChange(layerKey, key, numeric ? Number(event.target.value) : event.target.value)} /><em className={!difference ? "is-zero" : typeof difference.delta === "number" ? difference.delta > 0 ? "is-positive" : "is-negative" : "is-negative"}>{current == null ? "—" : !difference ? "一致" : typeof difference.delta === "number" ? `${difference.delta > 0 ? "+" : ""}${difference.delta}px` : "不同"}</em></label>;
-        })}</div>
+        })}</div>)}</div>
         <div className="property-layer-footer"><span>{match ? elements[match.elementIndex]?.selector || elements[match.elementIndex]?.tag : "尚未关联开发元素"}</span><Button disabled={!differences.length} onClick={() => onCreateIssue(layer, differences)}>转为问题</Button></div>
       </details>;
-    })}</div>}
+    })}</div></>}
     <footer>{capture ? `开发稿 CSS 采集于 ${new Date(capture.capturedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · 低置信度结果建议人工确认` : "尚未采集开发稿 CSS。"}</footer>
   </aside>;
 }
@@ -333,10 +336,11 @@ export function InspectorWorkspace() {
   }
   function createPropertyIssue(layer: FigmaLayer, differences: PropertyDifference[]) {
     const unit = (value: PropertyValue, key: InspectableProperty) => typeof value === "number" && key !== "fontWeight" ? `${value}px` : String(value);
-    const summary = differences.map(item => `开发稿${propertyLabels[item.key]}为 ${unit(item.actual, item.key)}，设计稿为 ${unit(item.design, item.key)}，建议调整为 ${unit(item.design, item.key)}。`).join("\n");
-    const typography = differences.some(item => ["fontFamily", "fontWeight", "fontSize", "lineHeight", "letterSpacing", "color"].includes(item.key));
+    const grouped = groupPropertyDifferences(differences); const primaryGroup = grouped[0]?.group ?? "state";
+    const summary = grouped.map(group => `【${group.label}】\n${group.differences.map(item => `开发稿${propertyLabels[item.key]}为 ${unit(item.actual, item.key)}，设计稿为 ${unit(item.design, item.key)}，建议调整为 ${unit(item.design, item.key)}。`).join("\n")}`).join("\n\n");
+    const issueType: IssueType = primaryGroup === "text" ? "字体与颜色" : primaryGroup === "layout" ? "布局与间距" : primaryGroup === "state" ? "内容错误" : "与设计稿不一致";
     const match = matchRecords[pageId]?.[layer.id]; const source = match ? `${match.method === "manual" ? "手动配对" : "自动匹配"}，置信度 ${match.confidence}%` : "人工校准";
-    const next: Issue = { id: Math.max(0, ...issues.map(issue => issue.id)) + 1, title: `${layer.name}${differences.length === 1 ? propertyLabels[differences[0].key] : "设计属性"}未对齐`, description: `${summary}\n\n数据来源：Figma 设计属性与开发页面计算样式；匹配方式：${source}。`, type: typography ? "字体与颜色" : "布局与间距", priority: "P2", pageId, deviceId, x: Math.max(0, Math.min(100, ((layer.x ?? 0) + (layer.width ?? 0) / 2) / Math.max(1, designs[pageId]?.width ?? device.width) * 100)), y: Math.max(0, Math.min(100, ((layer.y ?? 0) + (layer.height ?? 0) / 2) / Math.max(1, designs[pageId]?.height ?? canvasHeight) * 100)), canvasWidth: device.width, canvasHeight, createdAt: "刚刚" };
+    const next: Issue = { id: Math.max(0, ...issues.map(issue => issue.id)) + 1, title: `${layer.name}${grouped.length === 1 ? grouped[0].label : "设计属性"}未对齐`, description: `${summary}\n\n数据来源：Figma 设计属性与开发页面计算样式；匹配方式：${source}。`, type: issueType, priority: "P2", pageId, deviceId, x: Math.max(0, Math.min(100, ((layer.x ?? 0) + (layer.width ?? 0) / 2) / Math.max(1, designs[pageId]?.width ?? device.width) * 100)), y: Math.max(0, Math.min(100, ((layer.y ?? 0) + (layer.height ?? 0) / 2) / Math.max(1, designs[pageId]?.height ?? canvasHeight) * 100)), canvasWidth: device.width, canvasHeight, createdAt: "刚刚" };
     setEditing(next); setSelectedId(next.id); setPropertyOpen(false);
   }
   async function copyText(text: string, message: string) { try { await navigator.clipboard.writeText(text); showToast(message); } catch { showToast("复制失败，请检查浏览器权限"); } }

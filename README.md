@@ -31,7 +31,7 @@ After importing a Frame, use **属性检查** in the canvas toolbar to compare t
 
 `npm run dev` starts Inspector on port `3000` and a dedicated local collector receiver on port `3001`. Separating the receiver avoids exposing the application development server to cross-origin extension requests.
 
-Load the unpacked Manifest V3 extension from [`chrome-extension`](./chrome-extension). Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select that folder. Copy the session ID shown by Inspector into the extension popup and capture the active page. The extension reads visible text elements only: computed typography, bounding boxes, the page URL, and viewport dimensions. It does not read form values, cookies, local storage, browsing history, or network traffic.
+Load the unpacked Manifest V3 extension from [`chrome-extension`](./chrome-extension). Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select that folder. Copy the session ID shown by Inspector into the extension popup and capture the active page. The extension reads visible text and component styles, bounding boxes, lightweight parent selectors, the page URL, and viewport dimensions. It does not read form values, cookies, local storage, browsing history, or network traffic.
 
 The extension uses temporary `activeTab` access plus `chrome.scripting`; its host permission is limited to the local receiver. Chrome may show a Local Network Access permission prompt the first time it connects to localhost. The receiver includes the required local-network preflight response and keeps only a small in-memory snapshot for prototyping. It is unavailable in the static GitHub Pages build and is not designed as a hosted collection service.
 

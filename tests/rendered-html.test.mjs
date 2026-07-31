@@ -31,9 +31,14 @@ test("includes component inspection and downloadable collector assets", async ()
   assert.match(workspace, /onRematch/);
   assert.match(workspace, /置信度/);
   assert.match(model, /function autoMatch/);
+  assert.match(model, /groupPropertyDifferences/);
+  assert.match(model, /colorsVisuallyEqual/);
+  assert.match(model, /dedupeLayerDifferences/);
+  assert.match(model, /Math\.abs\(delta\) > threshold/);
   assert.match(model, /borderRadius/);
   assert.match(figmaRoute, /componentLayers/);
   assert.match(extension, /backgroundColor/);
   assert.match(extension, /paddingTop/);
+  assert.match(extension, /parentSelector/);
   await access(new URL("../public/tars-ui-inspector-chrome-extension.zip", import.meta.url));
 });

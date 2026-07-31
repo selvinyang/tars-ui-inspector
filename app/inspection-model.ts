@@ -4,7 +4,7 @@ export type PropertyValue = number | string;
 export type DevelopmentProperties = Partial<Record<InspectableProperty, PropertyValue>>;
 
 export type FigmaLayer = {
-  id: string; kind: LayerKind; nodeType: string; name: string; text?: string;
+  id: string; parentId?: string; kind: LayerKind; nodeType: string; name: string; text?: string;
   fontFamily?: string | null; fontWeight?: number | null; fontSize?: number | null; lineHeight?: number | null;
   lineHeightPercent?: number | null; letterSpacing?: number | null; textAlign?: string | null; color?: string | null;
   backgroundColor?: string | null; borderColor?: string | null; borderWidth?: number | null; borderRadius?: number | null;
@@ -19,7 +19,7 @@ export type FigmaInspection = {
 };
 
 export type SnapshotElement = {
-  text: string; tag: string; selector?: string; role?: string; elementType?: "text" | "control" | "image" | "link" | "container";
+  text: string; tag: string; selector?: string; parentSelector?: string; role?: string; elementType?: "text" | "control" | "image" | "link" | "container";
   fontFamily: string; fontWeight: number | null; fontSize: number | null; lineHeight: number | null; letterSpacing: number | null;
   color: string; backgroundColor?: string; borderColor?: string; borderWidth?: number | null; borderRadius?: number | null;
   paddingTop?: number | null; paddingRight?: number | null; paddingBottom?: number | null; paddingLeft?: number | null;
@@ -30,6 +30,9 @@ export type SnapshotElement = {
 export type PageSnapshot = { id: string; url: string; title: string; capturedAt: string; viewportWidth: number; viewportHeight: number; pageWidth: number; pageHeight: number; screenshot?: string; elements: SnapshotElement[] };
 export type MatchRecord = { elementIndex: number; confidence: number; method: "text" | "component" | "manual" };
 export type PropertyDifference = { key: InspectableProperty; design: PropertyValue; actual: PropertyValue; delta?: number };
+export type DifferenceGroup = "text" | "container" | "layout" | "state";
+export type GroupedDifferences = { group: DifferenceGroup; label: string; differences: PropertyDifference[] };
+export type StateDifferenceSummary = { missing: number; extra: number; content: number };
 
 export const propertyLabels: Record<InspectableProperty, string> = {
   fontFamily: "字体", fontWeight: "字重", fontSize: "字号", lineHeight: "行高", letterSpacing: "字距", color: "文字色",
@@ -41,6 +44,18 @@ export const propertyLabels: Record<InspectableProperty, string> = {
 
 export const textPropertyKeys: InspectableProperty[] = ["fontFamily", "fontWeight", "fontSize", "lineHeight", "letterSpacing", "color", "width", "height"];
 export const componentPropertyKeys: InspectableProperty[] = ["backgroundColor", "borderRadius", "borderWidth", "borderColor", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "gap", "width", "height"];
+export const differenceGroupLabels: Record<DifferenceGroup, string> = { text: "文字", container: "容器", layout: "布局", state: "状态" };
+
+const textKeys = new Set<InspectableProperty>(["fontFamily", "fontWeight", "fontSize", "lineHeight", "letterSpacing", "color"]);
+const containerKeys = new Set<InspectableProperty>(["width", "height", "backgroundColor", "borderRadius", "borderWidth", "borderColor"]);
+const layoutKeys = new Set<InspectableProperty>(["paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "gap"]);
+
+export function differenceGroupFor(key: InspectableProperty): DifferenceGroup {
+  if (textKeys.has(key)) return "text";
+  if (containerKeys.has(key)) return "container";
+  if (layoutKeys.has(key)) return "layout";
+  return "state";
+}
 
 export function inspectionLayers(inspection?: FigmaInspection) {
   if (!inspection) return [];
@@ -58,6 +73,19 @@ export function normalizeColor(value = "") {
   const hex = [rgb[1], rgb[2], rgb[3]].map(channel => Math.max(0, Math.min(255, Number(channel))).toString(16).padStart(2, "0")).join("").toUpperCase();
   const alpha = rgb[4] === undefined ? 1 : Number(rgb[4]);
   return alpha < .999 ? `#${hex} · ${Math.round(alpha * 100)}%` : `#${hex}`;
+}
+
+function colorChannels(value: string) {
+  const normalized = normalizeColor(value);
+  const match = normalized.match(/^#([0-9A-F]{6})(?:\s*·\s*(\d+)%?)?$/i);
+  if (!match) return null;
+  return { rgb: [0, 2, 4].map(offset => Number.parseInt(match[1].slice(offset, offset + 2), 16)), alpha: match[2] == null ? 100 : Number(match[2]) };
+}
+
+export function colorsVisuallyEqual(design: string, actual: string, channelTolerance = 3, alphaTolerance = 2) {
+  const left = colorChannels(design); const right = colorChannels(actual);
+  if (!left || !right) return normalizeColor(design) === normalizeColor(actual);
+  return left.rgb.every((channel, index) => Math.abs(channel - right.rgb[index]) <= channelTolerance) && Math.abs(left.alpha - right.alpha) <= alphaTolerance;
 }
 
 export function elementProperties(element: SnapshotElement): DevelopmentProperties {
@@ -127,12 +155,49 @@ export function propertyDifferences(layer: FigmaLayer, actual: DevelopmentProper
     const design = layer[key as keyof FigmaLayer]; const current = actual[key];
     if ((typeof design !== "number" && typeof design !== "string") || (typeof current !== "number" && typeof current !== "string")) return differences;
     if (typeof design === "number" && typeof current === "number") {
-      const delta = round(current - design); if (Math.abs(delta) >= .1) differences.push({ key, design, actual: current, delta }); return differences;
+      const delta = round(current - design);
+      const threshold = key === "width" || key === "height" ? 1 : key === "letterSpacing" ? .1 : .5;
+      if (Math.abs(delta) > threshold) differences.push({ key, design, actual: current, delta }); return differences;
     }
     const designText = key.toLowerCase().includes("color") ? normalizeColor(String(design)) : key === "fontFamily" ? normalizeFont(String(design)) : String(design).trim().toLowerCase();
     const actualText = key.toLowerCase().includes("color") ? normalizeColor(String(current)) : key === "fontFamily" ? normalizeFont(String(current)) : String(current).trim().toLowerCase();
-    if (designText !== actualText) differences.push({ key, design: String(design), actual: String(current) }); return differences;
+    const equal = key.toLowerCase().includes("color") ? colorsVisuallyEqual(String(design), String(current)) : designText === actualText;
+    if (!equal) differences.push({ key, design: String(design), actual: String(current) }); return differences;
   }, []);
+}
+
+export function groupPropertyDifferences(differences: PropertyDifference[]) {
+  return (["text", "container", "layout", "state"] as DifferenceGroup[]).map(group => ({ group, label: differenceGroupLabels[group], differences: differences.filter(item => differenceGroupFor(item.key) === group) })).filter(item => item.differences.length) as GroupedDifferences[];
+}
+
+export function dedupeLayerDifferences(entries: { layer: FigmaLayer; differences: PropertyDifference[] }[]) {
+  const seen = new Set<string>();
+  return entries.map(entry => {
+    const parent = entry.layer.parentId ?? "";
+    const differences = entry.differences.filter(item => {
+      const signature = `${parent}|${item.key}|${String(item.design)}|${String(item.actual)}`;
+      if (!parent || !seen.has(signature)) { seen.add(signature); return true; }
+      return false;
+    });
+    return { ...entry, differences };
+  });
+}
+
+export function inspectionStateSummary(layers: FigmaLayer[], elements: SnapshotElement[], matches: Record<string, MatchRecord>): StateDifferenceSummary {
+  const matchedIndexes = new Set(Object.values(matches).map(match => match.elementIndex));
+  const missing = layers.filter((layer, index) => !matches[layer.id || String(index)]).length;
+  const content = layers.filter((layer, index) => {
+    if (layer.kind !== "text") return false;
+    const match = matches[layer.id || String(index)]; const element = match ? elements[match.elementIndex] : undefined;
+    return !!element && normalizeText(layer.text) !== normalizeText(element.text);
+  }).length;
+  const uniqueExtras = new Set<string>();
+  elements.forEach((element, index) => {
+    if (matchedIndexes.has(index)) return;
+    const key = `${element.parentSelector ?? "root"}|${element.elementType ?? element.tag}|${normalizeText(element.text).slice(0, 30)}`;
+    uniqueExtras.add(key);
+  });
+  return { missing, extra: uniqueExtras.size, content };
 }
 
 export function candidateLabel(element: SnapshotElement) {

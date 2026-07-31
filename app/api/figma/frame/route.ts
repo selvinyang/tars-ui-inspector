@@ -66,12 +66,13 @@ function inspectLayers(root: FigmaNode) {
   let totalTextCount = 0;
   let totalComponentCount = 0;
 
-  function base(node: FigmaNode, kind: "text" | "component") {
+  function base(node: FigmaNode, kind: "text" | "component", parentId?: string) {
     const box = node.absoluteBoundingBox ?? {};
     const radii = node.rectangleCornerRadii?.filter(value => Number.isFinite(value));
     const cornerRadius = typeof node.cornerRadius === "number" ? node.cornerRadius : radii?.length ? Math.max(...radii) : null;
     return {
       id: node.id ?? "",
+      parentId,
       kind,
       nodeType: node.type ?? "NODE",
       name: node.name ?? (kind === "text" ? "未命名文字层" : "未命名组件层"),
@@ -91,7 +92,7 @@ function inspectLayers(root: FigmaNode) {
     };
   }
 
-  function visit(node: FigmaNode) {
+  function visit(node: FigmaNode, parentId?: string) {
     if (node.visible === false) return;
     if (node.type === "TEXT") {
       totalTextCount += 1;
@@ -99,7 +100,7 @@ function inspectLayers(root: FigmaNode) {
         const overrideCount = new Set(node.characterStyleOverrides ?? []).size;
         const mixed = overrideCount > 1 || Object.keys(node.styleOverrideTable ?? {}).length > 1;
         textLayers.push({
-          ...base(node, "text"),
+          ...base(node, "text", parentId),
           text: (node.characters ?? "").replace(/\s+/g, " ").trim(),
           fontFamily: node.style?.fontFamily ?? node.style?.fontPostScriptName ?? "未识别",
           fontWeight: round(node.style?.fontWeight, 0),
@@ -119,10 +120,10 @@ function inspectLayers(root: FigmaNode) {
       const box = node.absoluteBoundingBox;
       if (semantic && visual && box?.width && box?.height) {
         totalComponentCount += 1;
-        if (componentLayers.length < MAX_COMPONENT_LAYERS) componentLayers.push(base(node, "component"));
+        if (componentLayers.length < MAX_COMPONENT_LAYERS) componentLayers.push(base(node, "component", parentId));
       }
     }
-    node.children?.forEach(visit);
+    node.children?.forEach(child => visit(child, node.id));
   }
 
   visit(root);
