@@ -28,7 +28,7 @@ const server = http.createServer((request, response) => {
   request.on("data", chunk => { body += chunk; if (body.length > 15_000_000) request.destroy(); });
   request.on("end", () => {
     try {
-      const data = JSON.parse(body); const elements = Array.isArray(data.elements) ? data.elements.slice(0, 500) : [];
+      const data = JSON.parse(body); const elements = Array.isArray(data.elements) ? data.elements.slice(0, 800) : [];
       const screenshot = typeof data.screenshot === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(data.screenshot) ? data.screenshot : "";
       const snapshot = { id, url: String(data.url || ""), title: String(data.title || ""), capturedAt: new Date().toISOString(), viewportWidth: Number(data.viewportWidth) || 0, viewportHeight: Number(data.viewportHeight) || 0, pageWidth: Number(data.pageWidth) || 0, pageHeight: Number(data.pageHeight) || 0, screenshot, elements };
       snapshots.set(id, snapshot); while (snapshots.size > 20) snapshots.delete(snapshots.keys().next().value);

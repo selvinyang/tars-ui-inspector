@@ -6,6 +6,7 @@ import type { CompareMode, DesignAsset, DeviceGroup, Issue, IssueType, PageItem,
 import { Button, Field, IconButton, Input, Segmented, Select } from "./ui";
 import { deleteImage, loadImages, saveImage, type ImageKind } from "./image-store";
 import { DiffCanvas, ImageSurface, type Alignment, type DifferenceRegion } from "./comparison";
+import { autoMatch, candidateLabel, componentPropertyKeys, elementProperties, inspectionLayers, propertyDifferences, propertyLabels, textPropertyKeys, type DevelopmentProperties, type FigmaInspection, type FigmaLayer, type InspectableProperty, type MatchRecord, type PageSnapshot, type PropertyDifference, type PropertyValue, type SnapshotElement } from "./inspection-model";
 
 const modeOptions = [
   { value: "actual", label: "实际网页", short: "实际" }, { value: "design", label: "设计稿", short: "设计" },
@@ -13,15 +14,9 @@ const modeOptions = [
   { value: "diff", label: "差异高亮", short: "差异" },
 ] as { value: CompareMode; label: string; short: string }[];
 
-type FigmaTextLayer = { id: string; name: string; text: string; fontFamily: string; fontWeight: number | null; fontSize: number | null; lineHeight: number | null; lineHeightPercent: number | null; letterSpacing: number | null; textAlign: string | null; color: string | null; x: number | null; y: number | null; width: number | null; height: number | null; mixed: boolean; styleVariants: number };
-type FigmaInspection = { textCount: number; returnedTextCount: number; fontFamilies: { name: string; count: number }[]; textLayers: FigmaTextLayer[]; warnings: string[] };
 type FigmaFrame = { fileKey: string; nodeId: string; fileName: string; name: string; type: string; width: number; height: number; imagePath: string; inspection: FigmaInspection };
 type FigmaStatus = { connected: boolean; user?: { name: string; email: string }; error?: string };
-type InspectableProperty = "fontSize" | "lineHeight" | "letterSpacing" | "x" | "y" | "width" | "height";
-type DevelopmentProperties = Partial<Record<InspectableProperty, number>>;
-type PageSnapshot = { id: string; url: string; title: string; capturedAt: string; viewportWidth: number; viewportHeight: number; pageWidth: number; pageHeight: number; screenshot?: string; elements: { text: string; tag: string; fontFamily: string; fontWeight: number | null; fontSize: number | null; lineHeight: number | null; letterSpacing: number | null; color: string; x: number; y: number; width: number; height: number }[] };
-type CaptureMeta = { url: string; capturedAt: string; matched: number; total: number };
-const propertyLabels: Record<InspectableProperty, string> = { fontSize: "字号", lineHeight: "行高", letterSpacing: "字距", x: "距左", y: "距顶", width: "宽度", height: "高度" };
+type CaptureMeta = { url: string; capturedAt: string; matched: number; total: number; textMatched?: number; componentMatched?: number };
 
 function BrandLogo() {
   // This bundled SVG is a tiny local UI asset and does not need image optimization.
@@ -56,56 +51,54 @@ function IssueThumbnail({ src, label }: { src: string; label: string }) {
 }
 
 function FigmaFrameInspection({ frame }: { frame: FigmaFrame }) {
-  const px = (value: number | null) => value === null ? "—" : `${value}px`;
+  const px = (value: number | null | undefined) => value == null ? "—" : `${value}px`;
   return <div className="figma-result">
     <div className="figma-preview">{/* The preview is an authenticated same-origin image proxy. */}<img src={frame.imagePath} alt={`${frame.name} 预览`} /><div><small>{frame.fileName}</small><b>{frame.name}</b><span>{frame.type} · {frame.width} × {frame.height}</span></div></div>
     <section className="figma-inspection" aria-labelledby="figma-inspection-title">
-      <header><div><b id="figma-inspection-title">设计属性检查</b><small>{frame.inspection.textCount} 个文字图层 · {frame.inspection.fontFamilies.length} 种字体</small></div><span>FIGMA 数据</span></header>
+      <header><div><b id="figma-inspection-title">设计属性检查</b><small>{frame.inspection.textCount} 个文字图层 · {frame.inspection.componentCount ?? 0} 个组件图层 · {frame.inspection.fontFamilies.length} 种字体</small></div><span>FIGMA 数据</span></header>
       {frame.inspection.fontFamilies.length > 0 && <div className="figma-fonts">{frame.inspection.fontFamilies.map(font => <span key={font.name}>{font.name}<small>{font.count}</small></span>)}</div>}
       {frame.inspection.warnings.map(warning => <p className="figma-warning" key={warning}>{warning}</p>)}
       <div className="figma-layer-list">
-        {frame.inspection.textLayers.length ? frame.inspection.textLayers.map((layer, index) => <details key={layer.id || index}>
-          <summary><span><b>{layer.name}</b><small>{layer.text || "空文字图层"}</small></span><em>{px(layer.fontSize)}</em></summary>
+        {inspectionLayers(frame.inspection).length ? inspectionLayers(frame.inspection).map((layer, index) => <details key={layer.id || index}>
+          <summary><span><b>{layer.name}</b><small>{layer.kind === "text" ? layer.text || "空文字图层" : `${layer.nodeType} · 组件样式`}</small></span><em>{layer.kind === "text" ? px(layer.fontSize ?? null) : `${px(layer.width ?? null)} × ${px(layer.height ?? null)}`}</em></summary>
           <div className="figma-layer-specs">
-            <span><small>字体</small>{layer.fontFamily}{layer.fontWeight ? ` / ${layer.fontWeight}` : ""}</span>
-            <span><small>行高</small>{layer.lineHeight !== null ? px(layer.lineHeight) : layer.lineHeightPercent !== null ? `${layer.lineHeightPercent}%` : "—"}</span>
-            <span><small>字距</small>{px(layer.letterSpacing)}</span>
-            <span><small>颜色</small>{layer.color ?? "混合或未识别"}</span>
+            {layer.kind === "text" ? <><span><small>字体</small>{layer.fontFamily}{layer.fontWeight ? ` / ${layer.fontWeight}` : ""}</span><span><small>行高</small>{layer.lineHeight != null ? px(layer.lineHeight) : layer.lineHeightPercent != null ? `${layer.lineHeightPercent}%` : "—"}</span><span><small>字距</small>{px(layer.letterSpacing ?? null)}</span><span><small>文字色</small>{layer.color ?? "混合或未识别"}</span></> : <><span><small>背景色</small>{layer.backgroundColor ?? "无"}</span><span><small>圆角 / 边框</small>{px(layer.borderRadius ?? null)} / {px(layer.borderWidth ?? null)}</span><span><small>内边距</small>{[layer.paddingTop, layer.paddingRight, layer.paddingBottom, layer.paddingLeft].map(value => value ?? "—").join(" / ")}</span><span><small>元素间距</small>{px(layer.gap ?? null)}</span></>}
             <span><small>位置</small>距左 {px(layer.x)} / 距顶 {px(layer.y)}</span>
             <span><small>图层尺寸</small>{px(layer.width)} × {px(layer.height)}</span>
           </div>
-          {layer.mixed && <p className="figma-mixed">包含 {Math.max(2, layer.styleVariants)} 种局部文字样式，以上为图层基础样式。</p>}
-        </details>) : <p className="figma-no-layers">此 Frame 中没有检测到文字图层。</p>}
+          {layer.mixed && <p className="figma-mixed">包含 {Math.max(2, layer.styleVariants ?? 2)} 种局部文字样式，以上为图层基础样式。</p>}
+        </details>) : <p className="figma-no-layers">此 Frame 中没有检测到可检查图层。</p>}
       </div>
       <footer>属性来自 Figma 节点数据，可作为走查参考；最终渲染仍可能受网页字体加载和浏览器排版影响。</footer>
     </section>
   </div>;
 }
 
-function PropertyInspector({ inspection, values, capture, onChange, onCreateIssue, onClose }: { inspection?: FigmaInspection; values: Record<string, DevelopmentProperties>; capture?: CaptureMeta; onChange: (layerId: string, key: InspectableProperty, value: number) => void; onCreateIssue: (layer: FigmaTextLayer, differences: { key: InspectableProperty; design: number; actual: number; delta: number }[]) => void; onClose: () => void }) {
-  const layers = inspection?.textLayers ?? [];
-  const keys: InspectableProperty[] = ["fontSize", "lineHeight", "letterSpacing", "width", "height"];
+function PropertyInspector({ inspection, values, capture, elements, matches, onChange, onRematch, onCreateIssue, onClose }: { inspection?: FigmaInspection; values: Record<string, DevelopmentProperties>; capture?: CaptureMeta; elements: SnapshotElement[]; matches: Record<string, MatchRecord>; onChange: (layerId: string, key: InspectableProperty, value: PropertyValue) => void; onRematch: (layerId: string, elementIndex: number) => void; onCreateIssue: (layer: FigmaLayer, differences: PropertyDifference[]) => void; onClose: () => void }) {
+  const layers = inspectionLayers(inspection);
+  const valueText = (value: PropertyValue | null | undefined, key: InspectableProperty) => value == null ? "—" : typeof value === "number" ? `${value}${["fontWeight"].includes(key) ? "" : "px"}` : value;
   return <aside className="property-inspector" aria-label="设计属性检查">
-    <header><div><b>设计属性检查</b><small>{capture ? `已自动匹配 ${capture.matched}/${capture.total} 个文字图层` : "Figma 设计值 / 开发稿人工校准"}</small></div><IconButton label="关闭属性检查" onClick={onClose}>×</IconButton></header>
+    <header><div><b>设计属性检查</b><small>{capture ? `已匹配 ${capture.matched}/${capture.total} · 文字 ${capture.textMatched ?? 0} · 组件 ${capture.componentMatched ?? 0}` : "等待采集开发页面并自动匹配"}</small></div><IconButton label="关闭属性检查" onClick={onClose}>×</IconButton></header>
     {!inspection ? <div className="property-empty"><b>尚无设计属性</b><span>请先从 Figma 读取一个 Frame</span></div> : <div className="property-layer-list">{layers.map((layer, index) => {
       const layerKey = layer.id || String(index); const actual = values[layerKey] ?? {};
-      const differences = keys.flatMap(key => { const design = layer[key]; const current = actual[key]; return typeof design === "number" && typeof current === "number" && design !== current ? [{ key, design, actual: current, delta: Math.round((current - design) * 100) / 100 }] : []; });
+      const keys = layer.kind === "text" ? textPropertyKeys : componentPropertyKeys; const differences = propertyDifferences(layer, actual); const match = matches[layerKey];
       return <details key={layerKey} open={index === 0}>
-        <summary><span><b>{layer.name}</b><small>{layer.text || "空文字图层"}</small></span><em className={differences.length ? "has-diff" : ""}>{differences.length ? `${differences.length} 项偏差` : "已对齐"}</em></summary>
+        <summary><span><b>{layer.name}<i>{layer.kind === "text" ? "文字" : "组件"}</i></b><small>{layer.kind === "text" ? layer.text || "空文字图层" : layer.nodeType}</small></span><em className={differences.length ? "has-diff" : ""}>{match ? `${match.confidence}% · ${differences.length} 项偏差` : "未匹配"}</em></summary>
+        <div className="property-match"><label><span>开发元素</span><select aria-label={`${layer.name}匹配的开发元素`} value={match?.elementIndex ?? ""} onChange={event => onRematch(layerKey, Number(event.target.value))}><option value="">选择元素重新配对</option>{elements.map((element, elementIndex) => <option key={`${element.selector}-${elementIndex}`} value={elementIndex}>{candidateLabel(element)}</option>)}</select></label><small>{match ? `${match.method === "manual" ? "手动配对" : "自动匹配"} · 置信度 ${match.confidence}%` : "自动匹配失败，可手动选择开发元素"}</small></div>
         <div className="property-table"><div className="property-table-head"><span>属性</span><span>设计稿</span><span>开发稿</span><span>差值</span></div>{keys.map(key => {
-          const design = layer[key]; if (typeof design !== "number") return null;
-          const current = actual[key] ?? design; const delta = Math.round((current - design) * 100) / 100;
-          return <label key={key}><span>{propertyLabels[key]}</span><b>{design}px</b><input aria-label={`${layer.name}开发稿${propertyLabels[key]}`} type="number" step={key === "letterSpacing" ? .1 : 1} value={current} onChange={event => onChange(layerKey, key, Number(event.target.value))} /><em className={delta === 0 ? "is-zero" : delta > 0 ? "is-positive" : "is-negative"}>{delta === 0 ? "0px" : `${delta > 0 ? "+" : ""}${delta}px`}</em></label>;
+          const design = layer[key as keyof FigmaLayer]; if (typeof design !== "number" && typeof design !== "string") return null;
+          const current = actual[key]; const difference = differences.find(item => item.key === key); const numeric = typeof design === "number";
+          return <label key={key}><span>{propertyLabels[key]}</span><b title={String(design)}>{valueText(design, key)}</b><input aria-label={`${layer.name}开发稿${propertyLabels[key]}`} type={numeric ? "number" : "text"} step={key === "letterSpacing" ? .1 : 1} value={current ?? ""} placeholder="未采集" onChange={event => onChange(layerKey, key, numeric ? Number(event.target.value) : event.target.value)} /><em className={!difference ? "is-zero" : typeof difference.delta === "number" ? difference.delta > 0 ? "is-positive" : "is-negative" : "is-negative"}>{current == null ? "—" : !difference ? "一致" : typeof difference.delta === "number" ? `${difference.delta > 0 ? "+" : ""}${difference.delta}px` : "不同"}</em></label>;
         })}</div>
-        <div className="property-layer-footer"><span>{layer.fontFamily}{layer.fontWeight ? ` · ${layer.fontWeight}` : ""}{layer.color ? ` · ${layer.color}` : ""}</span><Button disabled={!differences.length} onClick={() => onCreateIssue(layer, differences)}>转为问题</Button></div>
+        <div className="property-layer-footer"><span>{match ? elements[match.elementIndex]?.selector || elements[match.elementIndex]?.tag : "尚未关联开发元素"}</span><Button disabled={!differences.length} onClick={() => onCreateIssue(layer, differences)}>转为问题</Button></div>
       </details>;
     })}</div>}
-    <footer>{capture ? `开发稿 CSS 采集于 ${new Date(capture.capturedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · 未匹配项仍可人工校准` : "尚未采集开发稿 CSS，当前数值可人工校准。"}</footer>
+    <footer>{capture ? `开发稿 CSS 采集于 ${new Date(capture.capturedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · 低置信度结果建议人工确认` : "尚未采集开发稿 CSS。"}</footer>
   </aside>;
 }
 
 function CollectorDialog({ id, loading, error, onCopy, onCheck, onClose }: { id: string; loading: boolean; error: string; onCopy: (value: string) => void; onCheck: () => void; onClose: () => void }) {
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}><div className="dialog collector-dialog" role="dialog" aria-modal="true" aria-labelledby="collector-title" onMouseDown={event => event.stopPropagation()}><div className="collector-heading"><div><small>CHROME COLLECTOR</small><h2 id="collector-title">采集开发页面属性</h2></div><IconButton label="关闭" onClick={onClose}>×</IconButton></div><div className="collector-method"><b>Chrome 扩展</b><span>适用于无法修改源码的线上网站</span></div><div className="collector-steps"><span>1</span><p>确认本地终端同时显示 Inspector <code>:3000</code> 和采集服务 <code>:3001</code> 已启动。</p></div><div className="collector-steps"><span>2</span><p>复制会话 ID，在待检查网页中打开 TARS 扩展，粘贴后点击“采集当前页面”。</p></div><div className="collector-code collector-session"><code>{id}</code><Button onClick={() => onCopy(id)}>复制会话 ID</Button></div><div className="collector-steps"><span>3</span><p>采集成功后返回这里，点击“检查连接并匹配”。请让网页视口宽度与当前设计稿一致。</p></div>{error && <p className="collector-error">{error}</p>}<div className="collector-notice">扩展仅在你点击时读取当前标签页的可见文字样式和尺寸，不申请 Cookie、历史记录或网络监听权限。</div><div className="dialog-actions"><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" disabled={loading || !id} onClick={onCheck}>{loading ? "正在匹配…" : "检查连接并匹配"}</Button></div></div></div>;
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}><div className="dialog collector-dialog" role="dialog" aria-modal="true" aria-labelledby="collector-title" onMouseDown={event => event.stopPropagation()}><div className="collector-heading"><div><small>CHROME COLLECTOR</small><h2 id="collector-title">采集开发页面属性</h2></div><IconButton label="关闭" onClick={onClose}>×</IconButton></div><div className="collector-method"><b>Chrome 扩展</b><span>适用于无法修改源码的线上网站</span></div><div className="collector-steps"><span>1</span><p>确认本地终端同时显示 Inspector <code>:3000</code> 和采集服务 <code>:3001</code> 已启动。</p></div><div className="collector-steps"><span>2</span><p>复制会话 ID，在待检查网页中打开 TARS 扩展，粘贴后点击“采集当前页面”。</p></div><div className="collector-code collector-session"><code>{id}</code><Button onClick={() => onCopy(id)}>复制会话 ID</Button></div><div className="collector-steps"><span>3</span><p>采集成功后返回这里，点击“检查连接并匹配”。请让网页视口宽度与当前设计稿一致。</p></div>{error && <p className="collector-error">{error}</p>}<div className="collector-notice">扩展仅在你点击时读取当前标签页的可见文字、组件样式和尺寸，不申请 Cookie、历史记录或网络监听权限。</div><div className="dialog-actions"><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" disabled={loading || !id} onClick={onCheck}>{loading ? "正在匹配…" : "检查连接并匹配"}</Button></div></div></div>;
 }
 
 function IntegrationCenter({ staticHosting, figmaReady, collectorReady, canCollect, onFigma, onCollector, onUploadDesign, onUploadActual, onClose }: { staticHosting: boolean; figmaReady: boolean; collectorReady: boolean; canCollect: boolean; onFigma: () => void; onCollector: () => void; onUploadDesign: () => void; onUploadActual: () => void; onClose: () => void }) {
@@ -198,6 +191,8 @@ export function InspectorWorkspace() {
   const [designInspections, setDesignInspections] = useState<Record<string, FigmaInspection>>({});
   const [developmentProperties, setDevelopmentProperties] = useState<Record<string, Record<string, DevelopmentProperties>>>({});
   const [captureMeta, setCaptureMeta] = useState<Record<string, CaptureMeta>>({});
+  const [capturedElements, setCapturedElements] = useState<Record<string, SnapshotElement[]>>({});
+  const [matchRecords, setMatchRecords] = useState<Record<string, Record<string, MatchRecord>>>({});
   const [collectorOpen, setCollectorOpen] = useState(false);
   const [collectorId, setCollectorId] = useState("collector-session");
   const [collectorLoading, setCollectorLoading] = useState(false);
@@ -216,9 +211,9 @@ export function InspectorWorkspace() {
   const assetHeight = (asset?: DesignAsset) => asset ? device.width * asset.height / asset.width : device.height;
   const canvasHeight = Math.max(device.height, mode === "actual" ? assetHeight(actuals[pageId]) : mode === "design" ? assetHeight(designs[pageId]) : assetHeight(actuals[pageId]), mode === "actual" ? device.height : assetHeight(designs[pageId]));
 
-  useEffect(() => { const raw = localStorage.getItem("tars-inspector-v2"); queueMicrotask(() => { if (raw) { try { const v = JSON.parse(raw); const savedPages = Array.isArray(v.pages) && v.pages.length ? v.pages as PageItem[] : initialPages; setProjectPages(savedPages); if (Array.isArray(v.issues)) setIssues(v.issues); if (v.pageId) setPageId(savedPages.some(page => page.id === v.pageId) ? v.pageId : savedPages[0].id); if (v.deviceId) setDeviceId(devices.some(d => d.id === v.deviceId) ? v.deviceId : "desktop-1440"); if (v.alignments && typeof v.alignments === "object") setAlignments(v.alignments); if (v.designInspections && typeof v.designInspections === "object") setDesignInspections(v.designInspections); if (v.developmentProperties && typeof v.developmentProperties === "object") setDevelopmentProperties(v.developmentProperties); if (v.captureMeta && typeof v.captureMeta === "object") setCaptureMeta(v.captureMeta); } catch {} } storageReady.current = true; }); loadImages().then(items => { const nextDesigns: Record<string, DesignAsset> = {}; const nextActuals: Record<string, DesignAsset> = {}; items.forEach(item => { (item.kind === "design" ? nextDesigns : nextActuals)[item.pageId] = item.asset; }); setDesigns(nextDesigns); setActuals(nextActuals); }).catch(() => showToast("本地图片库读取失败")); }, []);
+  useEffect(() => { const raw = localStorage.getItem("tars-inspector-v2"); queueMicrotask(() => { if (raw) { try { const v = JSON.parse(raw); const savedPages = Array.isArray(v.pages) && v.pages.length ? v.pages as PageItem[] : initialPages; setProjectPages(savedPages); if (Array.isArray(v.issues)) setIssues(v.issues); if (v.pageId) setPageId(savedPages.some(page => page.id === v.pageId) ? v.pageId : savedPages[0].id); if (v.deviceId) setDeviceId(devices.some(d => d.id === v.deviceId) ? v.deviceId : "desktop-1440"); if (v.alignments && typeof v.alignments === "object") setAlignments(v.alignments); if (v.designInspections && typeof v.designInspections === "object") setDesignInspections(v.designInspections); if (v.developmentProperties && typeof v.developmentProperties === "object") setDevelopmentProperties(v.developmentProperties); if (v.captureMeta && typeof v.captureMeta === "object") setCaptureMeta(v.captureMeta); if (v.capturedElements && typeof v.capturedElements === "object") setCapturedElements(v.capturedElements); if (v.matchRecords && typeof v.matchRecords === "object") setMatchRecords(v.matchRecords); } catch {} } storageReady.current = true; }); loadImages().then(items => { const nextDesigns: Record<string, DesignAsset> = {}; const nextActuals: Record<string, DesignAsset> = {}; items.forEach(item => { (item.kind === "design" ? nextDesigns : nextActuals)[item.pageId] = item.asset; }); setDesigns(nextDesigns); setActuals(nextActuals); }).catch(() => showToast("本地图片库读取失败")); }, []);
   useEffect(() => { const clearDragState = () => setDraggingFile(false); window.addEventListener("dragend", clearDragState); window.addEventListener("drop", clearDragState); window.addEventListener("blur", clearDragState); return () => { window.removeEventListener("dragend", clearDragState); window.removeEventListener("drop", clearDragState); window.removeEventListener("blur", clearDragState); }; }, []);
-  useEffect(() => { if (!storageReady.current) return; localStorage.setItem("tars-inspector-v2", JSON.stringify({ pages: projectPages, issues, pageId, deviceId, alignments, designInspections, developmentProperties, captureMeta })); }, [projectPages, issues, pageId, deviceId, alignments, designInspections, developmentProperties, captureMeta]);
+  useEffect(() => { if (!storageReady.current) return; localStorage.setItem("tars-inspector-v2", JSON.stringify({ pages: projectPages, issues, pageId, deviceId, alignments, designInspections, developmentProperties, captureMeta, capturedElements, matchRecords })); }, [projectPages, issues, pageId, deviceId, alignments, designInspections, developmentProperties, captureMeta, capturedElements, matchRecords]);
   const visibleIssues = useMemo(() => issues.filter(i => i.pageId === pageId && (query === "" || i.title.toLowerCase().includes(query.toLowerCase())) && (priority === "all" || i.priority === priority) && (type === "all" || i.type === type)), [issues, pageId, query, priority, type]);
   const pageIssues = issues.filter(i => i.pageId === pageId && i.deviceId === deviceId);
 
@@ -262,21 +257,13 @@ export function InspectorWorkspace() {
         const screenshotBlob = await screenshotResponse.blob();
         loadAsset(new File([screenshotBlob], `${snapshot.title || "开发页面"}-可见区域.jpg`, { type: screenshotBlob.type || "image/jpeg" }), "actual");
       }
-      const inspection = designInspections[pageId]; const used = new Set<number>(); const matchedValues: Record<string, DevelopmentProperties> = {}; let matched = 0;
-      const normalize = (value: string) => value.replace(/\s+/g, "").toLowerCase();
-      inspection.textLayers.forEach((layer, index) => {
-        const target = normalize(layer.text); if (!target) return;
-        const candidates = snapshot.elements.map((element, elementIndex) => ({ element, elementIndex, text: normalize(element.text) })).filter(item => !used.has(item.elementIndex) && (item.text === target || (target.length > 3 && (item.text.includes(target) || target.includes(item.text)))));
-        const best = candidates.sort((a, b) => {
-          const exactA = a.text === target ? 0 : 10000; const exactB = b.text === target ? 0 : 10000;
-          return exactA + Math.abs(a.element.x - (layer.x ?? 0)) + Math.abs(a.element.y - (layer.y ?? 0)) - exactB - Math.abs(b.element.x - (layer.x ?? 0)) - Math.abs(b.element.y - (layer.y ?? 0));
-        })[0];
-        if (!best) return; used.add(best.elementIndex); matched += 1;
-        matchedValues[layer.id || String(index)] = { fontSize: best.element.fontSize ?? undefined, lineHeight: best.element.lineHeight ?? undefined, letterSpacing: best.element.letterSpacing ?? undefined, x: best.element.x, y: best.element.y, width: best.element.width, height: best.element.height };
-      });
-      setDevelopmentProperties(old => ({ ...old, [pageId]: { ...(old[pageId] ?? {}), ...matchedValues } }));
-      setCaptureMeta(old => ({ ...old, [pageId]: { url: snapshot.url, capturedAt: snapshot.capturedAt, matched, total: inspection.textLayers.length } }));
-      setCollectorOpen(false); setPropertyOpen(true); showToast(`${snapshot.screenshot ? "页面截图已载入，" : ""}已自动匹配 ${matched} 个文字图层`);
+      const inspection = designInspections[pageId]; const result = autoMatch(inspection, snapshot.elements);
+      const layers = inspectionLayers(inspection); const textMatched = Object.entries(result.matches).filter(([key]) => layers.find((layer, index) => (layer.id || String(index)) === key)?.kind === "text").length; const componentMatched = Object.keys(result.matches).length - textMatched;
+      setDevelopmentProperties(old => ({ ...old, [pageId]: result.values }));
+      setCapturedElements(old => ({ ...old, [pageId]: snapshot.elements }));
+      setMatchRecords(old => ({ ...old, [pageId]: result.matches }));
+      setCaptureMeta(old => ({ ...old, [pageId]: { url: snapshot.url, capturedAt: snapshot.capturedAt, matched: Object.keys(result.matches).length, total: layers.length, textMatched, componentMatched } }));
+      setCollectorOpen(false); setPropertyOpen(true); showToast(`${snapshot.screenshot ? "页面截图已载入，" : ""}已匹配 ${textMatched} 个文字和 ${componentMatched} 个组件`);
     } catch (error) { setCollectorError(error instanceof Error ? error.message : "无法读取页面属性"); }
     finally { setCollectorLoading(false); }
   }
@@ -294,15 +281,10 @@ export function InspectorWorkspace() {
       if (!response.ok) throw new Error(result.error || "无法读取 Frame");
       setFigmaFrame(result);
       setDesignInspections(old => ({ ...old, [pageId]: result.inspection }));
-      setDevelopmentProperties(old => {
-        const existing = old[pageId] ?? {};
-        const initialized = { ...existing };
-        result.inspection.textLayers.forEach((layer, index) => {
-          const layerKey = layer.id || String(index);
-          if (!initialized[layerKey]) initialized[layerKey] = { fontSize: layer.fontSize ?? undefined, lineHeight: layer.lineHeight ?? undefined, letterSpacing: layer.letterSpacing ?? undefined, x: layer.x ?? undefined, y: layer.y ?? undefined, width: layer.width ?? undefined, height: layer.height ?? undefined };
-        });
-        return { ...old, [pageId]: initialized };
-      });
+      setDevelopmentProperties(old => ({ ...old, [pageId]: {} }));
+      setCapturedElements(old => ({ ...old, [pageId]: [] }));
+      setMatchRecords(old => ({ ...old, [pageId]: {} }));
+      setCaptureMeta(old => { const next = { ...old }; delete next[pageId]; return next; });
       const imageResponse = await fetch(result.imagePath);
       if (!imageResponse.ok) { const imageError = await imageResponse.json().catch(() => ({})) as { error?: string }; throw new Error(imageError.error || "无法导出 Frame 图片"); }
       const blob = await imageResponse.blob();
@@ -333,18 +315,28 @@ export function InspectorWorkspace() {
     setDesignInspections(old => { const next = { ...old }; delete next[page.id]; return next; });
     setDevelopmentProperties(old => { const next = { ...old }; delete next[page.id]; return next; });
     setCaptureMeta(old => { const next = { ...old }; delete next[page.id]; return next; });
-    setDesigns(old => { const next = { ...old }; if (next[page.id]?.objectUrl) URL.revokeObjectURL(next[page.id].objectUrl); delete next[page.id]; return next; });
-    setActuals(old => { const next = { ...old }; if (next[page.id]?.objectUrl) URL.revokeObjectURL(next[page.id].objectUrl); delete next[page.id]; return next; });
+    setCapturedElements(old => { const next = { ...old }; delete next[page.id]; return next; });
+    setMatchRecords(old => { const next = { ...old }; delete next[page.id]; return next; });
+    setDesigns(old => { const next = { ...old }; const source = next[page.id]?.objectUrl; if (source) URL.revokeObjectURL(source); delete next[page.id]; return next; });
+    setActuals(old => { const next = { ...old }; const source = next[page.id]?.objectUrl; if (source) URL.revokeObjectURL(source); delete next[page.id]; return next; });
     if (pageId === page.id) setPageId(nextPages[0].id);
     if (editing?.pageId === page.id) setEditing(null);
     setSelectedId(null); setPageToDelete(null); showToast(`已删除“${page.name}”及其本地数据`);
   }
   function setAlignment(patch: Partial<Alignment>) { setAlignments(old => ({ ...old, [pageId]: { ...alignment, ...patch } })); setDiffScore(null); }
-  function setDevelopmentProperty(layerId: string, key: InspectableProperty, value: number) { setDevelopmentProperties(old => ({ ...old, [pageId]: { ...(old[pageId] ?? {}), [layerId]: { ...(old[pageId]?.[layerId] ?? {}), [key]: value } } })); }
-  function createPropertyIssue(layer: FigmaTextLayer, differences: { key: InspectableProperty; design: number; actual: number; delta: number }[]) {
-    const summary = differences.map(item => `${propertyLabels[item.key]}：设计稿 ${item.design}px / 开发稿 ${item.actual}px（${item.delta > 0 ? "+" : ""}${item.delta}px）`).join("\n");
-    const typography = differences.some(item => ["fontSize", "lineHeight", "letterSpacing"].includes(item.key));
-    const next: Issue = { id: Math.max(0, ...issues.map(issue => issue.id)) + 1, title: `${layer.name}${differences.length === 1 ? propertyLabels[differences[0].key] : "设计属性"}未对齐`, description: `当前表现：开发稿与 Figma 设计属性存在偏差。\n\n${summary}\n\n数据来源：设计稿属性来自 Figma；开发稿属性为人工校准。`, type: typography ? "字体与颜色" : "布局与间距", priority: "P2", pageId, deviceId, x: Math.max(0, Math.min(100, ((layer.x ?? 0) + (layer.width ?? 0) / 2) / Math.max(1, designs[pageId]?.width ?? device.width) * 100)), y: Math.max(0, Math.min(100, ((layer.y ?? 0) + (layer.height ?? 0) / 2) / Math.max(1, designs[pageId]?.height ?? canvasHeight) * 100)), canvasWidth: device.width, canvasHeight, createdAt: "刚刚" };
+  function setDevelopmentProperty(layerId: string, key: InspectableProperty, value: PropertyValue) { setDevelopmentProperties(old => ({ ...old, [pageId]: { ...(old[pageId] ?? {}), [layerId]: { ...(old[pageId]?.[layerId] ?? {}), [key]: value } } })); }
+  function rematchLayer(layerId: string, elementIndex: number) {
+    const element = capturedElements[pageId]?.[elementIndex]; if (!element) return;
+    setDevelopmentProperties(old => ({ ...old, [pageId]: { ...(old[pageId] ?? {}), [layerId]: elementProperties(element) } }));
+    setMatchRecords(old => ({ ...old, [pageId]: { ...(old[pageId] ?? {}), [layerId]: { elementIndex, confidence: 100, method: "manual" } } }));
+    showToast(`已重新配对到 ${candidateLabel(element)}`);
+  }
+  function createPropertyIssue(layer: FigmaLayer, differences: PropertyDifference[]) {
+    const unit = (value: PropertyValue, key: InspectableProperty) => typeof value === "number" && key !== "fontWeight" ? `${value}px` : String(value);
+    const summary = differences.map(item => `开发稿${propertyLabels[item.key]}为 ${unit(item.actual, item.key)}，设计稿为 ${unit(item.design, item.key)}，建议调整为 ${unit(item.design, item.key)}。`).join("\n");
+    const typography = differences.some(item => ["fontFamily", "fontWeight", "fontSize", "lineHeight", "letterSpacing", "color"].includes(item.key));
+    const match = matchRecords[pageId]?.[layer.id]; const source = match ? `${match.method === "manual" ? "手动配对" : "自动匹配"}，置信度 ${match.confidence}%` : "人工校准";
+    const next: Issue = { id: Math.max(0, ...issues.map(issue => issue.id)) + 1, title: `${layer.name}${differences.length === 1 ? propertyLabels[differences[0].key] : "设计属性"}未对齐`, description: `${summary}\n\n数据来源：Figma 设计属性与开发页面计算样式；匹配方式：${source}。`, type: typography ? "字体与颜色" : "布局与间距", priority: "P2", pageId, deviceId, x: Math.max(0, Math.min(100, ((layer.x ?? 0) + (layer.width ?? 0) / 2) / Math.max(1, designs[pageId]?.width ?? device.width) * 100)), y: Math.max(0, Math.min(100, ((layer.y ?? 0) + (layer.height ?? 0) / 2) / Math.max(1, designs[pageId]?.height ?? canvasHeight) * 100)), canvasWidth: device.width, canvasHeight, createdAt: "刚刚" };
     setEditing(next); setSelectedId(next.id); setPropertyOpen(false);
   }
   async function copyText(text: string, message: string) { try { await navigator.clipboard.writeText(text); showToast(message); } catch { showToast("复制失败，请检查浏览器权限"); } }
@@ -387,7 +379,7 @@ export function InspectorWorkspace() {
           {draggingFile && <div className="upload-dropzone"><b>释放以上传{actuals[pageId] ? "设计稿" : "页面截图"}</b><span>PNG、JPG 或 WebP · 最大 20MB</span></div>}
         </div>
         {mode === "diff" && actuals[pageId] && designs[pageId] && <aside className="diff-region-summary"><header><div><b>自动差异区域</b><span>{diffRegions.length} 个建议</span></div><em>截图识别</em></header><div>{diffRegions.map(region => <button key={region.id} onClick={() => createRegionIssue(region)}><strong>#{region.id}</strong><span>{region.width} × {region.height}px</span><small>差异 {region.changedPercent}%</small><i>转为问题</i></button>)}{diffRegions.length === 0 && <p>正在分析主要差异区域…</p>}</div><footer>结果基于截图像素聚类，请人工确认</footer></aside>}
-        {propertyOpen && <PropertyInspector inspection={designInspections[pageId]} values={developmentProperties[pageId] ?? {}} capture={captureMeta[pageId]} onChange={setDevelopmentProperty} onCreateIssue={createPropertyIssue} onClose={() => setPropertyOpen(false)} />}
+        {propertyOpen && <PropertyInspector inspection={designInspections[pageId]} values={developmentProperties[pageId] ?? {}} capture={captureMeta[pageId]} elements={capturedElements[pageId] ?? []} matches={matchRecords[pageId] ?? {}} onChange={setDevelopmentProperty} onRematch={rematchLayer} onCreateIssue={createPropertyIssue} onClose={() => setPropertyOpen(false)} />}
       </div>
     </section>
     <aside className="right-panel">
