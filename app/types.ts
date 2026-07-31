@@ -22,4 +22,6 @@ export type Issue = {
   designThumbnail?: string;
   canvasWidth?: number;
   canvasHeight?: number;
+  regionWidth?: number;
+  regionHeight?: number;
 };
