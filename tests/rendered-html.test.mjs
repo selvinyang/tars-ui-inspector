@@ -30,6 +30,9 @@ test("includes component inspection and downloadable collector assets", async ()
   ]);
   assert.match(workspace, /onRematch/);
   assert.match(workspace, /置信度/);
+  assert.match(workspace, /将.*差异转为问题/);
+  assert.match(workspace, /cssPropertyNames/);
+  assert.match(workspace, /匹配置信度/);
   assert.match(model, /function autoMatch/);
   assert.match(model, /groupPropertyDifferences/);
   assert.match(model, /colorsVisuallyEqual/);

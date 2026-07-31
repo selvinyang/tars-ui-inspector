@@ -41,6 +41,13 @@ export const propertyLabels: Record<InspectableProperty, string> = {
   marginTop: "上外边距", marginRight: "右外边距", marginBottom: "下外边距", marginLeft: "左外边距", gap: "元素间距",
   x: "距左", y: "距顶", width: "宽度", height: "高度",
 };
+export const cssPropertyNames: Record<InspectableProperty, string> = {
+  fontFamily: "font-family", fontWeight: "font-weight", fontSize: "font-size", lineHeight: "line-height", letterSpacing: "letter-spacing", color: "color",
+  backgroundColor: "background-color", borderRadius: "border-radius", borderWidth: "border-width", borderColor: "border-color",
+  paddingTop: "padding-top", paddingRight: "padding-right", paddingBottom: "padding-bottom", paddingLeft: "padding-left",
+  marginTop: "margin-top", marginRight: "margin-right", marginBottom: "margin-bottom", marginLeft: "margin-left", gap: "gap",
+  x: "left", y: "top", width: "width", height: "height",
+};
 
 export const textPropertyKeys: InspectableProperty[] = ["fontFamily", "fontWeight", "fontSize", "lineHeight", "letterSpacing", "color", "width", "height"];
 export const componentPropertyKeys: InspectableProperty[] = ["backgroundColor", "borderRadius", "borderWidth", "borderColor", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "gap", "width", "height"];

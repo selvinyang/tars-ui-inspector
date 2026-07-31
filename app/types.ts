@@ -22,4 +22,8 @@ export type Issue = {
   designThumbnail?: string;
   canvasWidth?: number;
   canvasHeight?: number;
+  sourceSelector?: string;
+  propertyKey?: string;
+  matchConfidence?: number;
+  matchMethod?: "text" | "component" | "manual";
 };
